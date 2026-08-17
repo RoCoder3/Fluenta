@@ -13,3 +13,7 @@ npm-debug.log*
 
 # local packaging artifacts
 *.zip
+.vercel
+.env*
+# ...but the template carries no secrets and must stay tracked.
+!.env.example
