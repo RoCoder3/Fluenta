@@ -33,13 +33,28 @@ and a direct URL will exhaust the database's connection limit under load.
 
 | Variable | Value | Required |
 |---|---|---|
-| `DATABASE_URL` | The pooled `postgres://…` string | **yes** |
 | `AUTH_SECRET` | `openssl rand -base64 48` | **yes** |
+| `DATABASE_URL` | Pooled `postgres://…` string | only if not auto-injected |
 | `ANTHROPIC_API_KEY` | Your key | no — omit to run on the offline adapter |
 | `DATABASE_POOL_MAX` | Defaults to `1` in production | no |
 
-If Vercel's integration created `POSTGRES_URL` rather than `DATABASE_URL`, add
-`DATABASE_URL` yourself with the same value. The app reads `DATABASE_URL` only.
+**You usually do not need to set `DATABASE_URL` by hand.** The app accepts the names
+managed integrations inject, in this order:
+
+```
+DATABASE_URL → POSTGRES_URL → POSTGRES_PRISMA_URL → POSTGRES_URL_NON_POOLING
+```
+
+So Vercel Postgres and the Vercel↔Supabase integration work as-is. Migrations deliberately
+resolve in a different order, preferring `POSTGRES_URL_NON_POOLING`, because DDL and
+transaction-mode poolers do not mix.
+
+`AUTH_SECRET` is never auto-injected. You always have to set that one.
+
+> **The integration must be linked to this specific project.** A database created at the
+> team/account level injects nothing until you connect it to the project. In the Supabase
+> integration page, check that Fluenta is listed under connected projects — otherwise
+> `/api/health` will keep reporting `"source": "default (pglite)"`.
 
 ### 3. Run migrations against it, once
 

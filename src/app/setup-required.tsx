@@ -109,19 +109,23 @@ export function SetupRequired({ problems }: { problems: ConfigProblem[] }) {
               lineHeight: 1.75,
             }}
           >
-            <li>Storage → create a Postgres database, and copy its pooled connection string.</li>
             <li>
-              Settings → Environment Variables → add <code>DATABASE_URL</code> and{' '}
-              <code>AUTH_SECRET</code>.
+              Storage → create a Postgres database, and <strong>connect it to this project</strong>.
+              A database created at the team level injects nothing until it is linked here.
             </li>
             <li>
-              Run the migrations against it once, from your machine:
+              Settings → Environment Variables → add <code>AUTH_SECRET</code>.{' '}
+              <code>DATABASE_URL</code> is only needed if the integration did not inject{' '}
+              <code>POSTGRES_URL</code>.
+            </li>
+            <li>
+              Run the migrations once, from your machine:
               <br />
               <code style={{ fontSize: '12.5px' }}>
                 DATABASE_URL=&quot;postgres://…&quot; npm run db:migrate &amp;&amp; DATABASE_URL=&quot;postgres://…&quot; npm run db:seed
               </code>
             </li>
-            <li>Redeploy.</li>
+            <li>Redeploy, then check /api/health.</li>
           </ol>
         </div>
 

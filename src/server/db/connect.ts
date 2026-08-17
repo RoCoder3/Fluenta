@@ -9,19 +9,32 @@ import { drizzle as drizzlePglite } from 'drizzle-orm/pglite'
 import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js'
 
 import * as schema from './schema'
+import {
+  databaseUrlSource,
+  isPgliteUrl,
+  pgliteDataDirFrom,
+  resolveDatabaseUrl,
+  sslSettingFor,
+} from './url'
 
-const DEFAULT_URL = 'pglite://./.data/pg'
-
+/**
+ * Scripts prefer the direct (non-pooled) URL: migrations run DDL, which
+ * transaction-mode poolers handle badly.
+ */
 export function resolveUrl(): string {
-  return process.env.DATABASE_URL?.trim() || DEFAULT_URL
+  return resolveDatabaseUrl('migration')
+}
+
+export function urlSource(): string {
+  return databaseUrlSource('migration')
 }
 
 export function isPglite(url = resolveUrl()): boolean {
-  return url.startsWith('pglite://') || url.startsWith('file:')
+  return isPgliteUrl(url)
 }
 
 export function pgliteDataDir(url = resolveUrl()): string {
-  return url.replace(/^pglite:\/\//, '').replace(/^file:/, '')
+  return pgliteDataDirFrom(url)
 }
 
 /** Single canonical type — see the note in src/server/db/index.ts. */
@@ -47,7 +60,13 @@ export async function connect(): Promise<ScriptDb> {
   }
 
   const postgres = (await import('postgres')).default
-  const client = postgres(url, { max: 1, prepare: false })
+  const ssl = sslSettingFor(url)
+  const client = postgres(url, {
+    max: 1,
+    prepare: false,
+    connect_timeout: 30,
+    ...(ssl === undefined ? {} : { ssl }),
+  })
   return {
     db: drizzlePostgres(client, { schema }) as unknown as ScriptDatabase,
     kind: 'postgres',

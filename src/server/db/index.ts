@@ -19,6 +19,7 @@ import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js'
 import { config } from '@/server/config'
 
 import * as schema from './schema'
+import { isPgliteUrl, pgliteDataDirFrom, resolveDatabaseUrl, sslSettingFor } from './url'
 
 /**
  * One canonical database type rather than a union of the two driver types.
@@ -31,19 +32,17 @@ import * as schema from './schema'
  */
 export type Database = PgliteDatabase<typeof schema>
 
-const DEFAULT_URL = 'pglite://./.data/pg'
-
 function resolveUrl(): string {
-  return process.env.DATABASE_URL?.trim() || DEFAULT_URL
+  return resolveDatabaseUrl('runtime')
 }
 
 export function isPglite(url = resolveUrl()): boolean {
-  return url.startsWith('pglite://') || url.startsWith('file:')
+  return isPgliteUrl(url)
 }
 
 /** `pglite://./.data/pg` → `./.data/pg` */
 export function pgliteDataDir(url = resolveUrl()): string {
-  return url.replace(/^pglite:\/\//, '').replace(/^file:/, '')
+  return pgliteDataDirFrom(url)
 }
 
 /**
@@ -89,11 +88,13 @@ async function createDatabase(): Promise<Database> {
    * `prepare: false` is required for pgbouncer transaction-pooling mode, which
    * does not support session-level prepared statements.
    */
+  const ssl = sslSettingFor(url)
   const client = postgres(url, {
     max: config.databasePoolMax,
     prepare: false,
     idle_timeout: 20,
     connect_timeout: 15,
+    ...(ssl === undefined ? {} : { ssl }),
   })
 
   globalForDb.__ltClient = client

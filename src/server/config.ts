@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { databaseUrlSource, resolveDatabaseUrl } from '@/server/db/url'
+
 /**
  * Central environment access. Nothing else in the app reads process.env, so
  * the full set of external dependencies is visible in one file.
@@ -21,7 +23,13 @@ function int(key: string, fallback: number): number {
 }
 
 export const config = {
-  databaseUrl: str('DATABASE_URL', 'pglite://./.data/pg'),
+  /**
+   * Accepts DATABASE_URL or the names managed providers inject
+   * (POSTGRES_URL etc.) — see src/server/db/url.ts.
+   */
+  databaseUrl: resolveDatabaseUrl('runtime'),
+  /** Which variable supplied it. Safe to display; never the value itself. */
+  databaseUrlSource: databaseUrlSource('runtime'),
   /**
    * Connections per process. Serverless multiplies this by the number of live
    * instances, so production defaults to 1 and leans on a pooled connection
@@ -86,8 +94,12 @@ export function productionConfigProblems(): ConfigProblem[] {
   if (config.databaseUrl.startsWith('pglite://') || config.databaseUrl.startsWith('file:')) {
     problems.push({
       variable: 'DATABASE_URL',
-      problem: 'Points at embedded PGlite, which cannot run on serverless hosting.',
-      fix: 'Use a hosted Postgres connection string (postgres://…). On Vercel, prefer the pooled URL.',
+      problem:
+        'No Postgres connection string found. Embedded PGlite cannot run on serverless hosting.',
+      fix:
+        'Set DATABASE_URL to a pooled postgres:// string. POSTGRES_URL, POSTGRES_PRISMA_URL and ' +
+        'POSTGRES_URL_NON_POOLING are also accepted, so a Vercel Postgres or Supabase integration ' +
+        'works without renaming anything — but the integration must be linked to THIS project.',
     })
   }
 

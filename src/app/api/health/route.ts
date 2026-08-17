@@ -35,6 +35,8 @@ export async function GET() {
     database: {
       driver: config.databaseUrl.startsWith('pglite://') ? 'pglite (embedded)' : 'postgres',
       configured: !config.databaseUrl.startsWith('pglite://'),
+      // Which env var supplied the URL — the value is never included.
+      source: config.databaseUrlSource,
       reachable: false,
     },
     ai: { provider: config.ai.anthropicApiKey ? 'anthropic' : 'offline', keySet: Boolean(config.ai.anthropicApiKey) },

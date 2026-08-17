@@ -8,7 +8,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import { connect, isPglite, pgliteDataDir } from '../src/server/db/connect'
+import { connect, isPglite, pgliteDataDir, urlSource } from '../src/server/db/connect'
 
 async function main() {
   if (isPglite()) {
@@ -17,7 +17,7 @@ async function main() {
   }
 
   const { db, kind, close } = await connect()
-  console.log(`→ migrating (${kind})`)
+  console.log(`→ migrating (${kind}, from ${urlSource()})`)
 
   if (kind === 'pglite') {
     const { migrate } = await import('drizzle-orm/pglite/migrator')
