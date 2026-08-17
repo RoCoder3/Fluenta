@@ -69,6 +69,7 @@ Their level is ${model.estimatedLevel} — pitch the explanation there, not at a
   const db = await getDb()
   await db.insert(grammarExplanations).values({
     userId: input.userId,
+    targetLanguageCode: model.targetLanguageCode,
     question: input.question,
     triggerText: input.triggerText ?? null,
     patternKey: result.data.patternKey,
@@ -81,12 +82,17 @@ Their level is ${model.estimatedLevel} — pitch the explanation there, not at a
   return result.data
 }
 
-export async function getGrammarHistory(userId: string, limit = 30) {
+export async function getGrammarHistory(userId: string, languageCode: string, limit = 30) {
   const db = await getDb()
   return db
     .select()
     .from(grammarExplanations)
-    .where(eq(grammarExplanations.userId, userId))
+    .where(
+      and(
+        eq(grammarExplanations.userId, userId),
+        eq(grammarExplanations.targetLanguageCode, languageCode),
+      ),
+    )
     .orderBy(desc(grammarExplanations.createdAt))
     .limit(limit)
 }
@@ -138,13 +144,20 @@ Build their plan. Take into account what they already know — do not plan to te
   const [area] = await db
     .select({ id: lifeAreas.id })
     .from(lifeAreas)
-    .where(and(eq(lifeAreas.userId, input.userId), eq(lifeAreas.key, plan.suggestedLifeAreaKey)))
+    .where(
+      and(
+        eq(lifeAreas.userId, input.userId),
+        eq(lifeAreas.targetLanguageCode, model.targetLanguageCode),
+        eq(lifeAreas.key, plan.suggestedLifeAreaKey),
+      ),
+    )
     .limit(1)
 
   const [goal] = await db
     .insert(goals)
     .values({
       userId: input.userId,
+      targetLanguageCode: model.targetLanguageCode,
       lifeAreaId: area?.id ?? null,
       title: plan.title,
       description: plan.goalStatement,
@@ -159,6 +172,7 @@ Build their plan. Take into account what they already know — do not plan to te
   // Turn the ordered plan into a real roadmap so it shows up alongside the rest.
   const roadmapId = await persistRoadmap({
     userId: input.userId,
+    languageCode: model.targetLanguageCode,
     lifeAreaId: area?.id ?? null,
     goalId: goal.id,
     generated: {
@@ -261,7 +275,13 @@ Use the language they already know — a mission should feel like a stretch, not
     const [matchedArea] = await db
       .select({ id: lifeAreas.id })
       .from(lifeAreas)
-      .where(and(eq(lifeAreas.userId, input.userId), eq(lifeAreas.key, m.lifeAreaKey)))
+      .where(
+        and(
+          eq(lifeAreas.userId, input.userId),
+          eq(lifeAreas.targetLanguageCode, model.targetLanguageCode),
+          eq(lifeAreas.key, m.lifeAreaKey),
+        ),
+      )
       .limit(1)
 
     const phrasesForMission = m.preparationPhrases.length
@@ -288,6 +308,7 @@ Use the language they already know — a mission should feel like a stretch, not
       .insert(missions)
       .values({
         userId: input.userId,
+        targetLanguageCode: model.targetLanguageCode,
         lifeAreaId: matchedArea?.id ?? area?.id ?? null,
         title: m.title,
         description: m.description,
@@ -303,12 +324,12 @@ Use the language they already know — a mission should feel like a stretch, not
   return created
 }
 
-export async function listMissions(userId: string): Promise<Mission[]> {
+export async function listMissions(userId: string, languageCode: string): Promise<Mission[]> {
   const db = await getDb()
   return db
     .select()
     .from(missions)
-    .where(eq(missions.userId, userId))
+    .where(and(eq(missions.userId, userId), eq(missions.targetLanguageCode, languageCode)))
     .orderBy(desc(missions.createdAt))
 }
 
@@ -403,6 +424,7 @@ ${learnerText(input.message)}`,
   if (result.data.learnedAboutUser?.length) {
     await noteInferredFacts(
       input.userId,
+      model.targetLanguageCode,
       result.data.learnedAboutUser.map((fact) => ({ fact, confidence: 0.7 })),
       'tutor_chat',
     )

@@ -17,7 +17,7 @@ import {
   conversationTurnSchema,
   type GeneratedConversationAnalysis,
 } from '@/server/ai/schemas'
-import { SCENARIOS } from '@/server/content/german-corpus'
+import { contentPackFor } from '@/server/content'
 import { getDb } from '@/server/db'
 import {
   conversationAnalyses,
@@ -55,7 +55,9 @@ export async function startConversation(input: {
   const db = await getDb()
   const model = await buildLearnerModel(input.userId)
 
-  const template = SCENARIOS.find((s) => s.key === input.scenarioKey)
+  const template = contentPackFor(model.targetLanguageCode).scenarios.find(
+    (s) => s.key === input.scenarioKey,
+  )
 
   let scenarioTitle: string
   let situation: string
@@ -98,13 +100,20 @@ Pitch the partner's difficulty at the learner's level — slightly above, not fa
   const [area] = await db
     .select({ id: lifeAreas.id })
     .from(lifeAreas)
-    .where(and(eq(lifeAreas.userId, input.userId), eq(lifeAreas.key, lifeAreaKey)))
+    .where(
+      and(
+        eq(lifeAreas.userId, input.userId),
+        eq(lifeAreas.targetLanguageCode, model.targetLanguageCode),
+        eq(lifeAreas.key, lifeAreaKey),
+      ),
+    )
     .limit(1)
 
   const [conversation] = await db
     .insert(conversations)
     .values({
       userId: input.userId,
+      targetLanguageCode: model.targetLanguageCode,
       lifeAreaId: area?.id ?? null,
       scenarioKey: input.scenarioKey ?? 'custom',
       scenarioTitle,
@@ -305,6 +314,7 @@ Debrief them.`,
   // Mistakes made here go into the same error memory as writing feedback.
   await recordErrors({
     userId: input.userId,
+    languageCode: model.targetLanguageCode,
     sourceType: 'conversation',
     sourceId: conversation.id,
     corrections: analysis.mistakes.map((m) => ({
@@ -316,7 +326,7 @@ Debrief them.`,
     })),
   })
 
-  await applySkillEvidence(input.userId, {
+  await applySkillEvidence(input.userId, model.targetLanguageCode, {
     speaking: analysis.fluency.score,
     listening: analysis.comprehension.score,
     confidence: analysis.taskSuccess.achieved ? analysis.fluency.score + 10 : analysis.fluency.score - 5,
@@ -389,7 +399,7 @@ export async function listConversations(userId: string, limit = 20) {
 /** Scenario suggestions, ordered so the learner's weakest areas come first. */
 export function suggestScenarios(model: LearnerModel) {
   const priority = new Map(model.lifeAreas.map((a) => [a.key, a.readiness]))
-  return [...SCENARIOS].sort((a, b) => {
+  return [...contentPackFor(model.targetLanguageCode).scenarios].sort((a, b) => {
     const ra = priority.get(a.lifeAreaKey) ?? 100
     const rb = priority.get(b.lifeAreaKey) ?? 100
     return ra - rb

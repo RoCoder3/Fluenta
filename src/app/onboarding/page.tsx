@@ -5,6 +5,7 @@ import { getCurrentUser, hasCompletedOnboarding } from '@/server/auth'
 import { getDb } from '@/server/db'
 import { languages } from '@/server/db/schema'
 import { isLiveAi } from '@/server/ai/provider/registry'
+import { getActiveLanguage, getEnrollments } from '@/server/learner/language'
 
 import { OnboardingFlow } from './flow'
 
@@ -16,7 +17,19 @@ export default async function OnboardingPage() {
   if (await hasCompletedOnboarding(user.id)) redirect('/home')
 
   const db = await getDb()
-  const allLanguages = await db.select().from(languages)
+  const [allLanguages, activeLanguage, enrollments] = await Promise.all([
+    db.select().from(languages),
+    getActiveLanguage(user.id),
+    getEnrollments(user.id),
+  ])
+
+  /*
+   * Reaching onboarding from the language switcher is a different situation
+   * from reaching it after signup: the learner has already picked what they
+   * want, and they already know how this works. The flow reads these to skip
+   * the sales pitch and preselect their choice rather than asking twice.
+   */
+  const finishedAnother = enrollments.some((e) => e.onboarded && e.languageCode !== activeLanguage)
 
   return (
     <OnboardingFlow
@@ -29,6 +42,8 @@ export default async function OnboardingPage() {
         isExplanation: l.isExplanation,
       }))}
       liveAi={isLiveAi()}
+      initialTargetLanguage={activeLanguage}
+      isAdditionalLanguage={finishedAnother}
     />
   )
 }

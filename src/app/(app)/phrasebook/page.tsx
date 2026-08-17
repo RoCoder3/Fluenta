@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { getLibrary, type LibraryFilter } from '@/server/repositories/phrases'
 
 import { Phrasebook } from './phrasebook'
@@ -27,7 +28,7 @@ export default async function PhrasebookPage({
   ]
   const active = validFilters.includes(filter as LibraryFilter) ? (filter as LibraryFilter) : 'all'
 
-  const entries = await getLibrary(user.id, active, q ?? '')
+  const entries = await getLibrary(user.id, await getActiveLanguage(user.id), active, q ?? '')
 
   return (
     <Phrasebook

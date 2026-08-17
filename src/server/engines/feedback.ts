@@ -96,7 +96,13 @@ Their recurring mistakes are listed above. If one of them shows up again, note i
           await db
             .select({ id: lifeAreas.id })
             .from(lifeAreas)
-            .where(and(eq(lifeAreas.userId, input.userId), eq(lifeAreas.key, input.lifeAreaKey)))
+            .where(
+              and(
+                eq(lifeAreas.userId, input.userId),
+                eq(lifeAreas.targetLanguageCode, model.targetLanguageCode),
+                eq(lifeAreas.key, input.lifeAreaKey),
+              ),
+            )
             .limit(1)
         )[0]
       : null
@@ -105,6 +111,7 @@ Their recurring mistakes are listed above. If one of them shows up again, note i
       .insert(productionSubmissions)
       .values({
         userId: input.userId,
+        targetLanguageCode: model.targetLanguageCode,
         lifeAreaId: area?.id ?? null,
         mode: input.mode,
         format: input.format,
@@ -121,14 +128,19 @@ Their recurring mistakes are listed above. If one of them shows up again, note i
   // Everything downstream of the evaluation: error memory, skills, new phrases.
   await recordErrors({
     userId: input.userId,
+    languageCode: model.targetLanguageCode,
     sourceType: input.mode,
     sourceId: submissionId,
     corrections: evaluation.corrections,
   })
 
-  await noteCleanRun(input.userId, evaluation.corrections.map((c) => c.errorType))
+  await noteCleanRun(
+    input.userId,
+    model.targetLanguageCode,
+    evaluation.corrections.map((c) => c.errorType),
+  )
 
-  await applySkillEvidence(input.userId, {
+  await applySkillEvidence(input.userId, model.targetLanguageCode, {
     [input.mode]: evaluation.correctness * 0.5 + evaluation.naturalness * 0.3 + evaluation.taskCompletion * 0.2,
     vocabulary: evaluation.vocabularyRange,
     ...(input.mode === 'speaking' && evaluation.fluency ? { confidence: evaluation.fluency } : {}),
@@ -176,6 +188,7 @@ export type CorrectionLike = {
  */
 export async function recordErrors(input: {
   userId: string
+  languageCode: string
   sourceType: 'writing' | 'speaking' | 'conversation' | 'review'
   sourceId: string | null
   corrections: CorrectionLike[]
@@ -189,7 +202,13 @@ export async function recordErrors(input: {
     const [existing] = await db
       .select()
       .from(learnerErrors)
-      .where(and(eq(learnerErrors.userId, input.userId), eq(learnerErrors.type, type)))
+      .where(
+        and(
+          eq(learnerErrors.userId, input.userId),
+          eq(learnerErrors.targetLanguageCode, input.languageCode),
+          eq(learnerErrors.type, type),
+        ),
+      )
       .limit(1)
 
     let errorId: string
@@ -212,6 +231,7 @@ export async function recordErrors(input: {
         .insert(learnerErrors)
         .values({
           userId: input.userId,
+          targetLanguageCode: input.languageCode,
           type,
           category: categorize(type),
           label: labelFor(type),
@@ -238,12 +258,22 @@ export async function recordErrors(input: {
  * moves an error to `improving`, five to `resolved` — so the error list
  * reflects current reality instead of accumulating forever.
  */
-async function noteCleanRun(userId: string, errorTypesSeen: string[]): Promise<void> {
+async function noteCleanRun(
+  userId: string,
+  languageCode: string,
+  errorTypesSeen: string[],
+): Promise<void> {
   const db = await getDb()
   const active = await db
     .select()
     .from(learnerErrors)
-    .where(and(eq(learnerErrors.userId, userId), sql`${learnerErrors.status} != 'resolved'`))
+    .where(
+      and(
+        eq(learnerErrors.userId, userId),
+        eq(learnerErrors.targetLanguageCode, languageCode),
+        sql`${learnerErrors.status} != 'resolved'`,
+      ),
+    )
 
   for (const error of active) {
     if (errorTypesSeen.includes(error.type)) continue
@@ -289,13 +319,15 @@ function labelFor(type: string): string {
     .join(' ')
 }
 
-export async function getErrorProfile(userId: string) {
+export async function getErrorProfile(userId: string, languageCode: string) {
   const db = await getDb()
 
   const errors = await db
     .select()
     .from(learnerErrors)
-    .where(eq(learnerErrors.userId, userId))
+    .where(
+      and(eq(learnerErrors.userId, userId), eq(learnerErrors.targetLanguageCode, languageCode)),
+    )
     .orderBy(sql`
       case ${learnerErrors.status} when 'active' then 0 when 'improving' then 1 else 2 end,
       ${learnerErrors.frequency} desc
@@ -319,11 +351,13 @@ export async function getErrorProfile(userId: string) {
 /** Called when a review answer is wrong, so review failures feed the same model. */
 export async function recordReviewError(input: {
   userId: string
+  languageCode: string
   said: string
   expected: string
 }): Promise<void> {
   await recordErrors({
     userId: input.userId,
+    languageCode: input.languageCode,
     sourceType: 'review',
     sourceId: null,
     corrections: [
@@ -349,6 +383,7 @@ export async function recordReviewError(input: {
  */
 export async function noteInferredFacts(
   userId: string,
+  languageCode: string,
   facts: Array<{ fact: string; confidence: number }>,
   source: string,
 ): Promise<void> {
@@ -359,7 +394,9 @@ export async function noteInferredFacts(
   const [profile] = await db
     .select({ inferredFacts: learnerProfiles.inferredFacts })
     .from(learnerProfiles)
-    .where(eq(learnerProfiles.userId, userId))
+    .where(
+      and(eq(learnerProfiles.userId, userId), eq(learnerProfiles.targetLanguageCode, languageCode)),
+    )
     .limit(1)
 
   if (!profile) return
@@ -375,5 +412,7 @@ export async function noteInferredFacts(
   await db
     .update(learnerProfiles)
     .set({ inferredFacts: [...existing, ...additions].slice(-60), updatedAt: new Date() })
-    .where(eq(learnerProfiles.userId, userId))
+    .where(
+      and(eq(learnerProfiles.userId, userId), eq(learnerProfiles.targetLanguageCode, languageCode)),
+    )
 }

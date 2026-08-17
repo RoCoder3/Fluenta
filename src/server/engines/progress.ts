@@ -45,6 +45,7 @@ import {
  */
 export async function applySkillEvidence(
   userId: string,
+  languageCode: string,
   evidence: Partial<Record<SkillCategory | string, number>>,
 ): Promise<void> {
   const db = await getDb()
@@ -57,12 +58,20 @@ export async function applySkillEvidence(
     const [existing] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.userId, userId), eq(skills.category, category)))
+      .where(
+        and(
+          eq(skills.userId, userId),
+          eq(skills.targetLanguageCode, languageCode),
+          eq(skills.category, category),
+        ),
+      )
       .limit(1)
 
     if (!existing) {
-      await db.insert(skills).values({ userId, category, score, confidence: 0.25 })
-      await snapshot(userId, 'skill', category, score)
+      await db
+        .insert(skills)
+        .values({ userId, targetLanguageCode: languageCode, category, score, confidence: 0.25 })
+      await snapshot(userId, languageCode, 'skill', category, score)
       continue
     }
 
@@ -75,13 +84,14 @@ export async function applySkillEvidence(
       .set({ score: nextScore, confidence: nextConfidence, updatedAt: new Date() })
       .where(eq(skills.id, existing.id))
 
-    await snapshot(userId, 'skill', category, nextScore)
+    await snapshot(userId, languageCode, 'skill', category, nextScore)
   }
 }
 
 /** Snapshots are throttled to one per subject per day to keep trends readable. */
 async function snapshot(
   userId: string,
+  languageCode: string,
   kind: 'skill' | 'life_area' | 'overall',
   subject: string,
   value: number,
@@ -95,6 +105,7 @@ async function snapshot(
     .where(
       and(
         eq(progressSnapshots.userId, userId),
+        eq(progressSnapshots.targetLanguageCode, languageCode),
         eq(progressSnapshots.subject, subject),
         gte(progressSnapshots.recordedAt, since),
       ),
@@ -106,7 +117,9 @@ async function snapshot(
     return
   }
 
-  await db.insert(progressSnapshots).values({ userId, kind, subject, value })
+  await db
+    .insert(progressSnapshots)
+    .values({ userId, targetLanguageCode: languageCode, kind, subject, value })
 }
 
 /* -------------------------------------------------------------------------- */
@@ -123,12 +136,21 @@ async function snapshot(
  * The mission term is deliberately heavy: doing the thing in real life is
  * stronger evidence than any in-app score.
  */
-export async function recomputeAreaReadiness(userId: string, lifeAreaId?: string): Promise<void> {
+export async function recomputeAreaReadiness(
+  userId: string,
+  languageCode: string,
+  lifeAreaId?: string,
+): Promise<void> {
   const db = await getDb()
 
   const areas = lifeAreaId
     ? await db.select().from(lifeAreas).where(eq(lifeAreas.id, lifeAreaId))
-    : await db.select().from(lifeAreas).where(eq(lifeAreas.userId, userId))
+    : await db
+        .select()
+        .from(lifeAreas)
+        .where(
+          and(eq(lifeAreas.userId, userId), eq(lifeAreas.targetLanguageCode, languageCode)),
+        )
 
   for (const area of areas) {
     const [phraseRow] = await db
@@ -143,6 +165,7 @@ export async function recomputeAreaReadiness(userId: string, lifeAreaId?: string
       .where(
         and(
           eq(userPhrases.userId, userId),
+          eq(userPhrases.targetLanguageCode, languageCode),
           sql`${phrases.lifeAreaKeys} @> ${JSON.stringify([area.key])}::jsonb`,
         ),
       )
@@ -186,7 +209,7 @@ export async function recomputeAreaReadiness(userId: string, lifeAreaId?: string
       .set({ readiness, updatedAt: new Date() })
       .where(eq(lifeAreas.id, area.id))
 
-    await snapshot(userId, 'life_area', area.key, readiness)
+    await snapshot(userId, languageCode, 'life_area', area.key, readiness)
   }
 }
 
@@ -287,14 +310,24 @@ export type ProgressTrend = {
 }
 
 /** "Speaking confidence 42% → 61% over six weeks" — the trend that means something. */
-export async function getTrends(userId: string, days = 42): Promise<ProgressTrend[]> {
+export async function getTrends(
+  userId: string,
+  languageCode: string,
+  days = 42,
+): Promise<ProgressTrend[]> {
   const db = await getDb()
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
   const rows = await db
     .select()
     .from(progressSnapshots)
-    .where(and(eq(progressSnapshots.userId, userId), gte(progressSnapshots.recordedAt, since)))
+    .where(
+      and(
+        eq(progressSnapshots.userId, userId),
+        eq(progressSnapshots.targetLanguageCode, languageCode),
+        gte(progressSnapshots.recordedAt, since),
+      ),
+    )
     .orderBy(progressSnapshots.recordedAt)
 
   const bySubject = new Map<string, Array<{ value: number; at: Date }>>()
@@ -327,15 +360,27 @@ export type ProgressOverview = {
   trends: ProgressTrend[]
 }
 
-export async function getProgressOverview(userId: string): Promise<ProgressOverview> {
+export async function getProgressOverview(
+  userId: string,
+  languageCode: string,
+): Promise<ProgressOverview> {
   const db = await getDb()
 
   const [skillRows, areaRows, phraseRow, sessionRows, errorRows, missionRows, trends] = await Promise.all([
-    db.select().from(skills).where(eq(skills.userId, userId)),
+    db
+      .select()
+      .from(skills)
+      .where(and(eq(skills.userId, userId), eq(skills.targetLanguageCode, languageCode))),
     db
       .select()
       .from(lifeAreas)
-      .where(and(eq(lifeAreas.userId, userId), eq(lifeAreas.isActive, true)))
+      .where(
+        and(
+          eq(lifeAreas.userId, userId),
+          eq(lifeAreas.targetLanguageCode, languageCode),
+          eq(lifeAreas.isActive, true),
+        ),
+      )
       .orderBy(lifeAreas.priority),
     db
       .select({
@@ -344,26 +389,35 @@ export async function getProgressOverview(userId: string): Promise<ProgressOverv
         due: sql<number>`count(*) filter (where ${userPhrases.dueAt} <= now())::int`,
       })
       .from(userPhrases)
-      .where(eq(userPhrases.userId, userId)),
+      .where(
+        and(eq(userPhrases.userId, userId), eq(userPhrases.targetLanguageCode, languageCode)),
+      ),
     db
       .select({
         startedAt: learningSessions.startedAt,
         durationSeconds: learningSessions.durationSeconds,
       })
       .from(learningSessions)
-      .where(eq(learningSessions.userId, userId))
+      .where(
+        and(
+          eq(learningSessions.userId, userId),
+          eq(learningSessions.targetLanguageCode, languageCode),
+        ),
+      )
       .orderBy(desc(learningSessions.startedAt)),
     db
       .select({ status: learnerErrors.status, n: sql<number>`count(*)::int` })
       .from(learnerErrors)
-      .where(eq(learnerErrors.userId, userId))
+      .where(
+        and(eq(learnerErrors.userId, userId), eq(learnerErrors.targetLanguageCode, languageCode)),
+      )
       .groupBy(learnerErrors.status),
     db
       .select({ status: missions.status, n: sql<number>`count(*)::int` })
       .from(missions)
-      .where(eq(missions.userId, userId))
+      .where(and(eq(missions.userId, userId), eq(missions.targetLanguageCode, languageCode)))
       .groupBy(missions.status),
-    getTrends(userId),
+    getTrends(userId, languageCode),
   ])
 
   const errorCounts = { active: 0, improving: 0, resolved: 0 }
@@ -400,7 +454,11 @@ export async function getProgressOverview(userId: string): Promise<ProgressOverv
  * "What can I do now that I couldn't do before?" (§20) — assembled from
  * objectives demonstrated and missions completed, newest first.
  */
-export async function getNewCapabilities(userId: string, limit = 8): Promise<string[]> {
+export async function getNewCapabilities(
+  userId: string,
+  languageCode: string,
+  limit = 8,
+): Promise<string[]> {
   const db = await getDb()
 
   const objectives = await db
@@ -408,14 +466,26 @@ export async function getNewCapabilities(userId: string, limit = 8): Promise<str
     .from(roadmapObjectives)
     .innerJoin(roadmapStages, eq(roadmapStages.id, roadmapObjectives.stageId))
     .innerJoin(roadmaps, eq(roadmaps.id, roadmapStages.roadmapId))
-    .where(and(eq(roadmaps.userId, userId), inArray(roadmapObjectives.status, ['demonstrated', 'mastered'])))
+    .where(
+      and(
+        eq(roadmaps.userId, userId),
+        eq(roadmaps.targetLanguageCode, languageCode),
+        inArray(roadmapObjectives.status, ['demonstrated', 'mastered']),
+      ),
+    )
     .orderBy(desc(roadmapObjectives.lastEvidenceAt))
     .limit(limit)
 
   const completedMissions = await db
     .select({ title: missions.title, at: missions.completedAt })
     .from(missions)
-    .where(and(eq(missions.userId, userId), eq(missions.status, 'completed')))
+    .where(
+      and(
+        eq(missions.userId, userId),
+        eq(missions.targetLanguageCode, languageCode),
+        eq(missions.status, 'completed'),
+      ),
+    )
     .orderBy(desc(missions.completedAt))
     .limit(limit)
 

@@ -65,8 +65,9 @@ DATABASE_URL="postgres://…pooled…" npm run db:migrate
 DATABASE_URL="postgres://…pooled…" npm run db:seed
 ```
 
-`db:seed` loads the 30-phrase German corpus and the language rows. It is idempotent — safe
-to re-run.
+`db:seed` loads the language rows and every built-in corpus (German and Catalan today). It
+is idempotent — safe to re-run, and re-running it after adding a language is how you install
+that language's corpus.
 
 > If your provider gives a separate **direct** (non-pooled) URL, prefer it for these two
 > commands. Migrations run DDL, which some poolers handle awkwardly in transaction mode.

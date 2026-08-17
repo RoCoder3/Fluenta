@@ -228,7 +228,11 @@ export function nextModeFor(perf: ContextPerformance | null, mastery: number): R
   return mastery >= 70 ? 'situational' : 'produce'
 }
 
-export async function getDueItems(userId: string, limit = 12): Promise<DueItem[]> {
+export async function getDueItems(
+  userId: string,
+  languageCode: string,
+  limit = 12,
+): Promise<DueItem[]> {
   const db = await getDb()
 
   const rows = await db
@@ -244,7 +248,13 @@ export async function getDueItems(userId: string, limit = 12): Promise<DueItem[]
     })
     .from(userPhrases)
     .innerJoin(phrases, eq(phrases.id, userPhrases.phraseId))
-    .where(and(eq(userPhrases.userId, userId), lte(userPhrases.dueAt, new Date())))
+    .where(
+      and(
+        eq(userPhrases.userId, userId),
+        eq(userPhrases.targetLanguageCode, languageCode),
+        lte(userPhrases.dueAt, new Date()),
+      ),
+    )
     .orderBy(asc(userPhrases.dueAt))
     .limit(limit)
 
@@ -260,12 +270,18 @@ export async function getDueItems(userId: string, limit = 12): Promise<DueItem[]
   }))
 }
 
-export async function countDue(userId: string): Promise<number> {
+export async function countDue(userId: string, languageCode: string): Promise<number> {
   const db = await getDb()
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(userPhrases)
-    .where(and(eq(userPhrases.userId, userId), lte(userPhrases.dueAt, new Date())))
+    .where(
+      and(
+        eq(userPhrases.userId, userId),
+        eq(userPhrases.targetLanguageCode, languageCode),
+        lte(userPhrases.dueAt, new Date()),
+      ),
+    )
   return Number(row?.n ?? 0)
 }
 

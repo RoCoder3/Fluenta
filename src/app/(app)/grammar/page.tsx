@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { getGrammarHistory } from '@/server/engines/tutor'
 
 import { GrammarPage as GrammarClient } from './grammar'
@@ -12,7 +13,7 @@ export default async function GrammarPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/signin')
 
-  const history = await getGrammarHistory(user.id, 25)
+  const history = await getGrammarHistory(user.id, await getActiveLanguage(user.id), 25)
 
   return (
     <GrammarClient

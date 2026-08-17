@@ -17,6 +17,7 @@ import {
 } from '@/components/ui'
 import { pct, relativeTime } from '@/lib/utils'
 import { getCurrentUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { getDb } from '@/server/db'
 import { goals, missions } from '@/server/db/schema'
 import { getNewCapabilities } from '@/server/engines/progress'
@@ -33,14 +34,21 @@ export default async function HomePage() {
   if (!user) redirect('/signin')
 
   const db = await getDb()
+  const language = await getActiveLanguage(user.id)
   const [model, dueCount, capabilities, openMissions, activeGoals] = await Promise.all([
     buildLearnerModel(user.id),
-    countDue(user.id),
-    getNewCapabilities(user.id, 4),
+    countDue(user.id, language),
+    getNewCapabilities(user.id, language, 4),
     db
       .select()
       .from(missions)
-      .where(and(eq(missions.userId, user.id), eq(missions.status, 'suggested')))
+      .where(
+        and(
+          eq(missions.userId, user.id),
+          eq(missions.targetLanguageCode, language),
+          eq(missions.status, 'suggested'),
+        ),
+      )
       .limit(2),
     db
       .select()

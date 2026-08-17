@@ -9,7 +9,7 @@
  * module, so server modules can be imported outside the Next runtime.)
  */
 
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 import * as schema from '../src/server/db/schema'
 
@@ -49,7 +49,7 @@ async function main() {
     '../src/server/engines/content'
   )
   const { evaluateProduction, getErrorProfile } = await import('../src/server/engines/feedback')
-  const { getDueItems, recordReview, buildReviewQuestion, computeMastery } = await import(
+  const { getDueItems, recordReview, buildReviewQuestion, computeMastery, countDue } = await import(
     '../src/server/engines/review'
   )
   const { startConversation, takeTurn, endConversation } = await import(
@@ -63,6 +63,10 @@ async function main() {
   )
   const { buildLearnerModel, describeBiggestGap } = await import('../src/server/learner/model')
   const { getLibrary } = await import('../src/server/repositories/phrases')
+  const { tutorSystemPrompt } = await import('../src/server/engines/prompts')
+  const { generateLesson } = await import('../src/server/engines/content')
+  const { getActiveLanguage, getEnrollments, hasCompletedOnboardingFor, setActiveLanguage } =
+    await import('../src/server/learner/language')
 
   /* ---------------------------------------------------------------- 1. auth */
   section('1. Sign up')
@@ -90,7 +94,12 @@ async function main() {
     targetLanguageCode: 'de',
     explanationLanguageCode: 'en',
     motivations: ['work', 'daily_life', 'social'],
+    onboardingCompletedAt: new Date(),
   })
+  await db
+    .update(schema.users)
+    .set({ activeTargetLanguageCode: 'de' })
+    .where(eq(schema.users.id, userId))
 
   const intake = await extractIntake({
     userId,
@@ -118,11 +127,17 @@ async function main() {
       interests: ['climbing', 'cooking'],
       estimatedLevel: 'A2',
     })
-    .where(eq(schema.learnerProfiles.userId, userId))
+    .where(
+      and(
+        eq(schema.learnerProfiles.userId, userId),
+        eq(schema.learnerProfiles.targetLanguageCode, 'de'),
+      ),
+    )
 
   for (const [index, area] of intake.suggestedLifeAreas.entries()) {
     await db.insert(schema.lifeAreas).values({
       userId,
+      targetLanguageCode: 'de',
       key: area.key,
       name: area.name,
       description: area.description,
@@ -134,7 +149,7 @@ async function main() {
   const areas = await db.select().from(schema.lifeAreas).where(eq(schema.lifeAreas.userId, userId))
   check(`life areas persisted (${areas.length})`, areas.length >= 3)
 
-  await applySkillEvidence(userId, {
+  await applySkillEvidence(userId, 'de', {
     reading: 55,
     listening: 48,
     speaking: 28,
@@ -194,7 +209,7 @@ async function main() {
   /* -------------------------------------------------------------- 5. review */
   section('5. Spaced repetition')
 
-  const due = await getDueItems(userId, 5)
+  const due = await getDueItems(userId, 'de', 5)
   check(`items due for review (${due.length})`, due.length > 0)
 
   const firstDue = due[0]
@@ -230,7 +245,7 @@ async function main() {
       singleMode < 80,
     )
 
-    const nextMode = (await getDueItems(userId, 20)).find(
+    const nextMode = (await getDueItems(userId, 'de', 20)).find(
       (i) => i.phraseId === firstDue.phraseId,
     )?.mode
     check(
@@ -261,7 +276,7 @@ async function main() {
     `corrections: ${JSON.stringify(writing.evaluation.corrections.map((c) => c.corrected))}`,
   )
 
-  const errorsAfterFirst = await getErrorProfile(userId)
+  const errorsAfterFirst = await getErrorProfile(userId, 'de')
   check(`error memory recorded a pattern (${errorsAfterFirst.length})`, errorsAfterFirst.length > 0)
 
   // Same mistake again — must merge into the existing row, not create a new one.
@@ -273,7 +288,7 @@ async function main() {
     content: 'Ich gehe zu der Apotheke.',
   })
 
-  const errorsAfterSecond = await getErrorProfile(userId)
+  const errorsAfterSecond = await getErrorProfile(userId, 'de')
   const contraction = errorsAfterSecond.find((e) => e.type === 'preposition_contraction')
   check('repeat mistake merged into one pattern', errorsAfterSecond.length === errorsAfterFirst.length)
   check(
@@ -397,7 +412,7 @@ async function main() {
   check('session marked complete', completedSession?.status === 'completed')
   check('duration recorded', (completedSession?.durationSeconds ?? -1) >= 0)
 
-  await recomputeAreaReadiness(userId)
+  await recomputeAreaReadiness(userId, 'de')
   const areasAfter = await db
     .select()
     .from(schema.lifeAreas)
@@ -408,7 +423,7 @@ async function main() {
     `readiness values: ${areasAfter.map((a) => `${a.key}=${a.readiness.toFixed(1)}`).join(', ')}`,
   )
 
-  const overview = await getProgressOverview(userId)
+  const overview = await getProgressOverview(userId, 'de')
   check('progress overview assembled', overview.skills.length > 0)
   check('phrase counts present', overview.phrases.total > 0)
   check('trend snapshots recorded', overview.trends.length > 0)
@@ -422,7 +437,7 @@ async function main() {
   /* -------------------------------------------------------- 13. phrasebook */
   section('13. Phrasebook')
 
-  const library = await getLibrary(userId, 'all')
+  const library = await getLibrary(userId, 'de', 'all')
   check(`library populated (${library.length})`, library.length > 0)
   check('entries carry context', library.every((e) => e.context.length > 0))
   check(
@@ -430,7 +445,7 @@ async function main() {
     library.every((e) => typeof e.mastery === 'number'),
   )
 
-  const favorites = await getLibrary(userId, 'favorite')
+  const favorites = await getLibrary(userId, 'de', 'favorite')
   check('favorite filter works', Array.isArray(favorites))
 
   /* ------------------------------------------------------ 14. AI telemetry */
@@ -448,6 +463,102 @@ async function main() {
   const redacted = redact('Contact me at tester@example.com or +41 79 123 45 67', ['Smoke Tester'])
   check('emails redacted', !redacted.includes('tester@example.com'))
   check('phone numbers redacted', !redacted.includes('79 123 45 67'))
+
+  /* ------------------------------------------- 15. multi-language isolation */
+  section('15. Adding a second language')
+
+  const germanPhrasesBefore = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.userPhrases)
+    .where(
+      and(eq(schema.userPhrases.userId, userId), eq(schema.userPhrases.targetLanguageCode, 'de')),
+    )
+  const germanCountBefore = Number(germanPhrasesBefore[0]?.n ?? 0)
+
+  const germanErrors = await getErrorProfile(userId, 'de')
+  const germanAreas = await db
+    .select()
+    .from(schema.lifeAreas)
+    .where(and(eq(schema.lifeAreas.userId, userId), eq(schema.lifeAreas.targetLanguageCode, 'de')))
+
+  // Enroll in Catalan, exactly as switchLanguageAction + onboarding would.
+  await db.insert(schema.learnerProfiles).values({
+    userId,
+    nativeLanguageCode: 'en',
+    targetLanguageCode: 'ca',
+    explanationLanguageCode: 'en',
+    motivations: ['social', 'bureaucracy'],
+  })
+  await setActiveLanguage(userId, 'ca')
+
+  check('active language switched to Catalan', (await getActiveLanguage(userId)) === 'ca')
+  check(
+    'Catalan needs its own onboarding',
+    (await hasCompletedOnboardingFor(userId, 'ca')) === false,
+  )
+  check(
+    'German onboarding is still complete',
+    (await hasCompletedOnboardingFor(userId, 'de')) === true,
+  )
+
+  const catalanModel = await buildLearnerModel(userId)
+  check('learner model follows the active language', catalanModel.targetLanguageCode === 'ca')
+  check(
+    `no German phrases leaked into Catalan (${catalanModel.knownPhrases.length + catalanModel.weakPhrases.length} known)`,
+    catalanModel.knownPhrases.length === 0 && catalanModel.weakPhrases.length === 0,
+  )
+  check('no German errors leaked into Catalan', catalanModel.recurringErrors.length === 0)
+  check('no German life areas leaked into Catalan', catalanModel.lifeAreas.length === 0)
+  check(
+    'Catalan review queue is empty, not inherited',
+    (await countDue(userId, 'ca')) === 0,
+  )
+  check(
+    `Catalan skills start unmeasured (speaking ${catalanModel.skills.speaking.score})`,
+    catalanModel.skills.speaking.score === 0,
+  )
+
+  // The prompt the tutor would actually receive must carry Catalan's rules.
+  const catalanPrompt = tutorSystemPrompt(catalanModel)
+  check('prompt declares Catalan as the target', catalanPrompt.includes('Target language: Catalan'))
+  check('prompt carries Catalan quality rules', catalanPrompt.includes('PERIPHRASTIC preterite'))
+  check('prompt drops the German rules', !catalanPrompt.includes('Swiss German dialect'))
+
+  // Offline content must come from the Catalan pack, not the German one.
+  const catalanLesson = await generateLesson({
+    model: catalanModel,
+    lifeAreaKey: 'social',
+  }).catch(() => null)
+  if (catalanLesson) {
+    const allText = JSON.stringify(catalanLesson)
+    check('offline lesson is Catalan, not German', !/\bIch\b|\bnicht\b|\bTermin\b/.test(allText))
+    check(
+      'offline lesson contains real Catalan',
+      /vaig |què |aquest|si us plau|Bon dia|plego/i.test(allText),
+    )
+  }
+
+  // Switching back must find German exactly as it was.
+  await setActiveLanguage(userId, 'de')
+  const germanAgain = await buildLearnerModel(userId)
+  check('switched back to German', germanAgain.targetLanguageCode === 'de')
+  check(
+    `German phrases intact after the round trip (${germanAgain.phraseCounts.total})`,
+    germanAgain.phraseCounts.total === germanCountBefore,
+  )
+  check(
+    `German errors intact (${germanAgain.recurringErrors.length})`,
+    germanAgain.recurringErrors.length === germanErrors.filter((e) => e.status !== 'resolved').length,
+  )
+  check(
+    `German life areas intact (${germanAgain.lifeAreas.length})`,
+    germanAgain.lifeAreas.length === germanAreas.filter((a) => a.isActive).length,
+  )
+  check('German readiness preserved', germanAgain.lifeAreas.some((a) => a.readiness > 0))
+
+  const enrollments = await getEnrollments(userId)
+  check(`both enrollments listed (${enrollments.length})`, enrollments.length === 2)
+  check('active flag correct', enrollments.find((e) => e.isActive)?.languageCode === 'de')
 
   /* ----------------------------------------------------------------- done */
   console.log('\n' + '='.repeat(60))

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { listMissions } from '@/server/engines/tutor'
 import { buildLearnerModel } from '@/server/learner/model'
 import { findPhrasesByIds } from '@/server/repositories/phrases'
@@ -14,7 +15,7 @@ export default async function MissionsPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/signin')
 
-  const [missions, model] = await Promise.all([listMissions(user.id), buildLearnerModel(user.id)])
+  const [missions, model] = await Promise.all([listMissions(user.id, await getActiveLanguage(user.id)), buildLearnerModel(user.id)])
 
   const areaNames = new Map(model.lifeAreas.map((a) => [a.id, a.name]))
 

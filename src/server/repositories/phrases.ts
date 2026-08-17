@@ -108,10 +108,11 @@ export async function upsertPhrases(inputs: PhraseInput[]): Promise<Phrase[]> {
  */
 export async function attachToLearner(
   userId: string,
-  phraseId: string,
+  phrase: Pick<Phrase, 'id' | 'languageCode'>,
   acquiredVia: UserPhrase['acquiredVia'] = 'lesson',
 ): Promise<UserPhrase> {
   const db = await getDb()
+  const phraseId = phrase.id
 
   const [existing] = await db
     .select()
@@ -123,7 +124,16 @@ export async function attachToLearner(
 
   const [created] = await db
     .insert(userPhrases)
-    .values({ userId, phraseId, acquiredVia, dueAt: new Date() })
+    // The language is taken from the phrase itself, never from the learner's
+    // current selection: a phrase's language is a fact about the phrase, and
+    // deriving it here makes it impossible for the two to disagree.
+    .values({
+      userId,
+      phraseId,
+      targetLanguageCode: phrase.languageCode,
+      acquiredVia,
+      dueAt: new Date(),
+    })
     .onConflictDoNothing()
     .returning()
 
@@ -147,7 +157,7 @@ export async function teachPhrases(
 ): Promise<Phrase[]> {
   const stored = await upsertPhrases(inputs)
   for (const phrase of stored) {
-    await attachToLearner(userId, phrase.id, acquiredVia)
+    await attachToLearner(userId, phrase, acquiredVia)
   }
   return stored
 }
@@ -170,12 +180,16 @@ export type LibraryEntry = Phrase & {
 
 export async function getLibrary(
   userId: string,
+  languageCode: string,
   filter: LibraryFilter = 'all',
   search = '',
 ): Promise<LibraryEntry[]> {
   const db = await getDb()
 
-  const conditions = [eq(userPhrases.userId, userId)]
+  const conditions = [
+    eq(userPhrases.userId, userId),
+    eq(userPhrases.targetLanguageCode, languageCode),
+  ]
   if (filter === 'learning') conditions.push(eq(userPhrases.status, 'learning'))
   if (filter === 'mastered') conditions.push(eq(userPhrases.status, 'mastered'))
   if (filter === 'review') conditions.push(eq(userPhrases.status, 'review'))
@@ -242,13 +256,19 @@ export async function toggleFavorite(userId: string, phraseId: string): Promise<
 }
 
 /** Phrases the learner already has, for engines that must avoid re-teaching. */
-export async function getKnownTexts(userId: string, limit = 200): Promise<string[]> {
+export async function getKnownTexts(
+  userId: string,
+  languageCode: string,
+  limit = 200,
+): Promise<string[]> {
   const db = await getDb()
   const rows = await db
     .select({ text: phrases.text })
     .from(userPhrases)
     .innerJoin(phrases, eq(phrases.id, userPhrases.phraseId))
-    .where(eq(userPhrases.userId, userId))
+    .where(
+      and(eq(userPhrases.userId, userId), eq(userPhrases.targetLanguageCode, languageCode)),
+    )
     .limit(limit)
   return rows.map((r) => r.text)
 }

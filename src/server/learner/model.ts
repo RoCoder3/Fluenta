@@ -13,7 +13,9 @@ import 'server-only'
 
 import { and, desc, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm'
 
+import { languageName } from '@/lib/languages'
 import { getDb } from '@/server/db'
+import { getActiveLanguage } from '@/server/learner/language'
 import {
   conversations,
   crossDomainItems,
@@ -101,9 +103,18 @@ const ALL_SKILLS: SkillCategory[] = [
   'confidence',
 ]
 
+/**
+ * Assembles the model for the language the learner is currently studying.
+ *
+ * Every query below is scoped to that language. This is the single most
+ * important place for it: the model is serialized into the brief that opens
+ * every generation prompt, so an unscoped read here would quietly ask the tutor
+ * to build Catalan lessons out of the learner's German vocabulary.
+ */
 export async function buildLearnerModel(userId: string): Promise<LearnerModel> {
   const db = await getDb()
   const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+  const languageCode = await getActiveLanguage(userId)
 
   const [
     userRows,
@@ -118,22 +129,52 @@ export async function buildLearnerModel(userId: string): Promise<LearnerModel> {
     speakingCount,
   ] = await Promise.all([
     db.select().from(users).where(eq(users.id, userId)).limit(1),
-    db.select().from(learnerProfiles).where(eq(learnerProfiles.userId, userId)).limit(1),
+    db
+      .select()
+      .from(learnerProfiles)
+      .where(
+        and(
+          eq(learnerProfiles.userId, userId),
+          eq(learnerProfiles.targetLanguageCode, languageCode),
+        ),
+      )
+      .limit(1),
     db
       .select()
       .from(lifeAreas)
-      .where(and(eq(lifeAreas.userId, userId), eq(lifeAreas.isActive, true)))
+      .where(
+        and(
+          eq(lifeAreas.userId, userId),
+          eq(lifeAreas.targetLanguageCode, languageCode),
+          eq(lifeAreas.isActive, true),
+        ),
+      )
       .orderBy(lifeAreas.priority),
     db
       .select()
       .from(goals)
-      .where(and(eq(goals.userId, userId), eq(goals.status, 'active')))
+      .where(
+        and(
+          eq(goals.userId, userId),
+          eq(goals.targetLanguageCode, languageCode),
+          eq(goals.status, 'active'),
+        ),
+      )
       .orderBy(goals.createdAt),
-    db.select().from(skills).where(eq(skills.userId, userId)),
+    db
+      .select()
+      .from(skills)
+      .where(and(eq(skills.userId, userId), eq(skills.targetLanguageCode, languageCode))),
     db
       .select()
       .from(learnerErrors)
-      .where(and(eq(learnerErrors.userId, userId), inArray(learnerErrors.status, ['active', 'improving'])))
+      .where(
+        and(
+          eq(learnerErrors.userId, userId),
+          eq(learnerErrors.targetLanguageCode, languageCode),
+          inArray(learnerErrors.status, ['active', 'improving']),
+        ),
+      )
       .orderBy(desc(learnerErrors.frequency))
       .limit(12),
     db
@@ -143,17 +184,38 @@ export async function buildLearnerModel(userId: string): Promise<LearnerModel> {
         completedAt: learningSessions.completedAt,
       })
       .from(learningSessions)
-      .where(and(eq(learningSessions.userId, userId), gte(learningSessions.startedAt, fourteenDaysAgo))),
-    countRows(db, conversations, eq(conversations.userId, userId)),
+      .where(
+        and(
+          eq(learningSessions.userId, userId),
+          eq(learningSessions.targetLanguageCode, languageCode),
+          gte(learningSessions.startedAt, fourteenDaysAgo),
+        ),
+      ),
     countRows(
       db,
-      productionSubmissions,
-      and(eq(productionSubmissions.userId, userId), eq(productionSubmissions.mode, 'writing')),
+      conversations,
+      and(
+        eq(conversations.userId, userId),
+        eq(conversations.targetLanguageCode, languageCode),
+      ),
     ),
     countRows(
       db,
       productionSubmissions,
-      and(eq(productionSubmissions.userId, userId), eq(productionSubmissions.mode, 'speaking')),
+      and(
+        eq(productionSubmissions.userId, userId),
+        eq(productionSubmissions.targetLanguageCode, languageCode),
+        eq(productionSubmissions.mode, 'writing'),
+      ),
+    ),
+    countRows(
+      db,
+      productionSubmissions,
+      and(
+        eq(productionSubmissions.userId, userId),
+        eq(productionSubmissions.targetLanguageCode, languageCode),
+        eq(productionSubmissions.mode, 'speaking'),
+      ),
     ),
   ])
 
@@ -161,16 +223,21 @@ export async function buildLearnerModel(userId: string): Promise<LearnerModel> {
   const profile = profileRows[0] ?? null
 
   const [knownPhrases, weakPhrases, counts, focus] = await Promise.all([
-    fetchPhrases(userId, { minMastery: 60, limit: 60 }),
-    fetchPhrases(userId, { maxMastery: 60, limit: 30 }),
-    fetchPhraseCounts(userId),
-    fetchCurrentFocus(userId),
+    fetchPhrases(userId, languageCode, { minMastery: 60, limit: 60 }),
+    fetchPhrases(userId, languageCode, { maxMastery: 60, limit: 30 }),
+    fetchPhraseCounts(userId, languageCode),
+    fetchCurrentFocus(userId, languageCode),
   ])
 
   const lastSession = await db
     .select({ startedAt: learningSessions.startedAt })
     .from(learningSessions)
-    .where(eq(learningSessions.userId, userId))
+    .where(
+      and(
+        eq(learningSessions.userId, userId),
+        eq(learningSessions.targetLanguageCode, languageCode),
+      ),
+    )
     .orderBy(desc(learningSessions.startedAt))
     .limit(1)
 
@@ -178,7 +245,7 @@ export async function buildLearnerModel(userId: string): Promise<LearnerModel> {
     userId,
     name: user?.name ?? 'Learner',
     profile,
-    targetLanguageCode: profile?.targetLanguageCode ?? 'de',
+    targetLanguageCode: languageCode,
     explanationLanguageCode: profile?.explanationLanguageCode ?? 'en',
     lifeAreas: areaRows,
     activeGoals: goalRows.map((g) => ({
@@ -221,10 +288,14 @@ async function countRows(db: any, table: any, where: any): Promise<number> {
 
 async function fetchPhrases(
   userId: string,
+  languageCode: string,
   opts: { minMastery?: number; maxMastery?: number; limit: number },
 ): Promise<KnownPhrase[]> {
   const db = await getDb()
-  const conditions = [eq(userPhrases.userId, userId)]
+  const conditions = [
+    eq(userPhrases.userId, userId),
+    eq(userPhrases.targetLanguageCode, languageCode),
+  ]
   if (opts.minMastery !== undefined) conditions.push(gte(userPhrases.mastery, opts.minMastery))
   if (opts.maxMastery !== undefined) conditions.push(lte(userPhrases.mastery, opts.maxMastery))
 
@@ -249,7 +320,7 @@ async function fetchPhrases(
   return rows
 }
 
-async function fetchPhraseCounts(userId: string) {
+async function fetchPhraseCounts(userId: string, languageCode: string) {
   const db = await getDb()
   const [row] = await db
     .select({
@@ -259,7 +330,9 @@ async function fetchPhraseCounts(userId: string) {
       due: sql<number>`count(*) filter (where ${userPhrases.dueAt} <= now())::int`,
     })
     .from(userPhrases)
-    .where(eq(userPhrases.userId, userId))
+    .where(
+      and(eq(userPhrases.userId, userId), eq(userPhrases.targetLanguageCode, languageCode)),
+    )
 
   return {
     total: Number(row?.total ?? 0),
@@ -273,7 +346,10 @@ async function fetchPhraseCounts(userId: string) {
  * The highest-priority life area with an unfinished stage. This is what "what
  * should I do next" resolves to when the learner has not chosen explicitly.
  */
-async function fetchCurrentFocus(userId: string): Promise<LearnerModel['currentFocus']> {
+async function fetchCurrentFocus(
+  userId: string,
+  languageCode: string,
+): Promise<LearnerModel['currentFocus']> {
   const db = await getDb()
 
   const rows = await db
@@ -291,6 +367,7 @@ async function fetchCurrentFocus(userId: string): Promise<LearnerModel['currentF
     .where(
       and(
         eq(roadmaps.userId, userId),
+        eq(roadmaps.targetLanguageCode, languageCode),
         eq(roadmaps.status, 'active'),
         eq(lifeAreas.isActive, true),
         inArray(roadmapStages.status, ['available', 'in_progress']),
@@ -463,7 +540,7 @@ export function describeBiggestGap(model: LearnerModel): string {
     return 'You are just getting started — the first sessions will map out where you actually stand.'
   }
   if (comprehension - production > 15) {
-    return 'You understand German noticeably better than you can produce it. More speaking, less input.'
+    return `You understand ${languageName(model.targetLanguageCode)} noticeably better than you can produce it. More speaking, less input.`
   }
   if (s.speaking.score < s.writing.score - 12) {
     return 'Your writing is ahead of your speaking. You need time under pressure, not more vocabulary.'

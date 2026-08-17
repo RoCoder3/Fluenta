@@ -9,6 +9,7 @@ import type {
   GeneratedTutorReply,
 } from '@/server/ai/schemas'
 import { requireUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { endConversation, startConversation, takeTurn } from '@/server/engines/conversation'
 import { recomputeAreaReadiness } from '@/server/engines/progress'
 import {
@@ -55,7 +56,7 @@ export async function sendConversationTurnAction(input: {
 export async function endConversationAction(conversationId: string): Promise<GeneratedConversationAnalysis> {
   const user = await requireUser()
   const analysis = await endConversation({ userId: user.id, conversationId })
-  await recomputeAreaReadiness(user.id)
+  await recomputeAreaReadiness(user.id, await getActiveLanguage(user.id))
   revalidatePath('/progress')
   return analysis
 }

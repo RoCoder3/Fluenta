@@ -18,6 +18,8 @@ import { Badge } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { signOutAction } from '@/server/actions/auth'
 
+import { LanguageSwitcher, type SwitcherLanguage } from './language-switcher'
+
 const NAV = [
   { href: '/home', label: 'Home', icon: Home },
   { href: '/learn', label: 'Learn', icon: GraduationCap },
@@ -36,10 +38,14 @@ export function AppNav({
   userName,
   dueCount,
   liveAi,
+  languages,
+  activeLanguage,
 }: {
   userName: string
   dueCount: number
   liveAi: boolean
+  languages: SwitcherLanguage[]
+  activeLanguage: string
 }) {
   const pathname = usePathname()
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
@@ -67,6 +73,8 @@ export function AppNav({
         </nav>
 
         <div className="p-3 border-t border-line space-y-2">
+          <LanguageSwitcher languages={languages} activeCode={activeLanguage} />
+
           {!liveAi && (
             <div className="px-3 py-2 rounded-lg bg-canvas border border-line">
               <p className="text-[11px] text-ink-muted leading-relaxed">
@@ -85,6 +93,21 @@ export function AppNav({
           </form>
         </div>
       </aside>
+
+      {/*
+        Mobile top bar. Exists mainly to carry the language switcher: the
+        sidebar is hidden below lg and the bottom bar only fits five
+        destinations, so without this, switching language would be a
+        desktop-only feature.
+      */}
+      <header className="lg:hidden sticky top-0 z-40 flex items-center gap-3 px-4 py-2.5 border-b border-line bg-surface/95 backdrop-blur-sm">
+        <Link href="/home" className="font-display text-base shrink-0">
+          Fluenta
+        </Link>
+        <div className="ml-auto w-44">
+          <LanguageSwitcher languages={languages} activeCode={activeLanguage} placement="below" />
+        </div>
+      </header>
 
       {/* Mobile bottom bar */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-line bg-surface/95 backdrop-blur-sm">

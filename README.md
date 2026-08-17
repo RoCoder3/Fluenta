@@ -1,7 +1,9 @@
 # Fluenta
 
-A personalized, needs-based language-learning app. The first target language is German with
-English explanations, but nothing in the schema or the engines is German-specific.
+A personalized, needs-based language-learning app. German and Catalan ship today, with
+English explanations; nothing in the schema or the engines is specific to either. A learner
+can study several languages at once — each keeps its own roadmap, phrases, error memory and
+progress, and switching between them neither merges nor discards anything.
 
 The premise: **don't learn a language in the abstract — learn the language your life
 actually requires.** The learner describes where they live, what they do and what they keep
@@ -75,7 +77,7 @@ src/
     ├── engines/              the AI domain layer (see below)
     ├── learner/model.ts      the LearnerModel — one place that knows everything
     ├── repositories/         persistence for the shared phrase corpus
-    ├── content/              hand-authored German corpus
+    ├── content/              hand-authored corpora, one file per language
     ├── actions/              Server Actions (the only entry points from the UI)
     ├── auth/                 sessions & passwords
     └── db/                   schema, drivers, migrations
@@ -97,7 +99,7 @@ engine, which calls the provider registry with a Zod schema.
 | `progress` | Skill scores, life-area readiness, trends |
 | `tutor` | Grammar on request, goal planning, missions, chat |
 
-`engines/prompts.ts` holds the tutor's behavioural rules (§28) and the German quality rules
+`engines/prompts.ts` holds the tutor's behavioural rules (§28) and the per-language quality rules
 (§29) in exactly one place, so a new engine inherits the teaching philosophy for free rather
 than re-deriving it.
 
@@ -160,8 +162,11 @@ marked `skipped`, not `locked`.
 
 26 tables. Notable design points:
 
-- **Language neutrality.** Nothing says "German". Content carries `languageCode`; learners
-  carry `targetLanguageCode` + `explanationLanguageCode`. German/English is a seed row.
+- **Language neutrality.** Nothing says "German". Content carries `languageCode`, and every
+  row of learner progress carries `targetLanguageCode`. `learner_profiles` is keyed by
+  (user, language) — it is an enrollment, not a single profile — so studying Catalan neither
+  disturbs nor inherits from German. Adding a language is a corpus file, a registry entry and
+  a seed row.
 - **Shared corpus, personal state.** `phrases` is deduped on `(languageCode, normalized)` so
   the same phrase generated for two learners is one row; `user_phrases` holds per-learner
   mastery on top. Generated content accumulates into an asset instead of duplicating.
@@ -216,7 +221,7 @@ Known limitations worth naming:
 - **Speech recognition is Chrome/Safari only.** Firefox has no support; the UI detects this and
   offers typing, so speaking practice degrades to writing rather than disappearing.
 - **Offline evaluation is honest about its limits.** Without an API key, feedback scores
-  measurable things (length, sentence variety) and catches a few mechanical German slips. It
+  measurable things (length, sentence variety) and catches a few mechanical slips per language. It
   says so rather than pretending to grade nuance.
 - **No background job queue.** Roadmap generation runs inline at the end of onboarding. With
   live AI on a slow model this is a visible wait; a queue is the right fix at real scale.

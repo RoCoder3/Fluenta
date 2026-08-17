@@ -17,23 +17,9 @@
  *     (Velo, Znüni, Grüezi), which matters for a learner in Zurich.
  */
 
-export type CorpusPhrase = {
-  text: string
-  translation: string
-  literal?: string
-  context: string
-  register: 'informal' | 'neutral' | 'formal' | 'professional' | 'slang'
-  regionTag?: string
-  naturalnessNote?: string
-  difficulty: number
-  cefrHint: string
-  pronunciation?: string
-  lifeAreaKeys: string[]
-  grammarPatterns: string[]
-  vocab: Array<{ lemma: string; translation: string; pos?: string; article?: string; plural?: string }>
-  examples: Array<{ text: string; translation: string; note?: string }>
-  tags: string[]
-}
+import type { CorpusDialogue, CorpusPhrase, OfflineContent, ScenarioTemplate } from './types'
+
+export type { CorpusDialogue, CorpusPhrase, ScenarioTemplate } from './types'
 
 /* ========================================================================== */
 /* Work                                                                       */
@@ -566,32 +552,10 @@ const misc: CorpusPhrase[] = [
 
 export const GERMAN_CORPUS: CorpusPhrase[] = [...work, ...dailyLife, ...social, ...bureaucracy, ...misc]
 
-/** Phrases relevant to a set of life-area keys, best matches first. */
-export function corpusForAreas(areaKeys: string[], limit = 12): CorpusPhrase[] {
-  const scored = GERMAN_CORPUS.map((phrase) => ({
-    phrase,
-    score: phrase.lifeAreaKeys.filter((k) => areaKeys.includes(k)).length,
-  }))
-  return scored
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score || a.phrase.difficulty - b.phrase.difficulty)
-    .slice(0, limit)
-    .map((s) => s.phrase)
-}
 
 /* ========================================================================== */
 /* Dialogues — used by lessons and by the offline adapter                     */
 /* ========================================================================== */
-
-export type CorpusDialogue = {
-  key: string
-  lifeAreaKeys: string[]
-  title: string
-  situation: string
-  level: string
-  speakers: Array<{ label: string; role: string }>
-  lines: Array<{ speaker: string; text: string; translation: string; note?: string }>
-}
 
 export const GERMAN_DIALOGUES: CorpusDialogue[] = [
   {
@@ -657,25 +621,7 @@ export const GERMAN_DIALOGUES: CorpusDialogue[] = [
 /* Scenario library for the conversation simulator                            */
 /* ========================================================================== */
 
-export type ScenarioTemplate = {
-  key: string
-  title: string
-  lifeAreaKey: string
-  situation: string
-  difficulty: number
-  learnerObjective: string
-  persona: {
-    name: string
-    role: string
-    register: 'du' | 'Sie'
-    region: string
-    personality: string
-    openingLine: string
-  }
-  usefulPhrases: Array<{ text: string; translation: string }>
-}
-
-export const SCENARIOS: ScenarioTemplate[] = [
+export const GERMAN_SCENARIOS: ScenarioTemplate[] = [
   {
     key: 'restaurant_order',
     title: 'Ordering dinner',
@@ -803,18 +749,249 @@ export const SCENARIOS: ScenarioTemplate[] = [
   },
 ]
 
-/** Default life areas offered during onboarding before anything is personalized. */
-export const DEFAULT_LIFE_AREAS = [
-  { key: 'work', name: 'Work', description: 'Meetings, colleagues, explaining what you do', subAreas: ['introducing yourself', 'meetings', 'small talk', 'explaining problems', 'emails'] },
-  { key: 'daily_life', name: 'Daily life', description: 'Shops, appointments, phone calls, getting around', subAreas: ['supermarket', 'appointments', 'public transport', 'phone calls'] },
-  { key: 'social', name: 'Social life', description: 'Making friends, small talk, opinions, stories', subAreas: ['introductions', 'making friends', 'telling stories', 'expressing opinions'] },
-  { key: 'bureaucracy', name: 'Bureaucracy', description: 'Offices, forms, insurance, registration', subAreas: ['registration', 'forms', 'insurance', 'official letters'] },
-  { key: 'food', name: 'Food & restaurants', description: 'Ordering, menus, dietary needs', subAreas: ['restaurants', 'cafés', 'ordering', 'dietary requirements'] },
-  { key: 'housing', name: 'Housing', description: 'Landlords, repairs, neighbours', subAreas: ['landlord', 'repairs', 'neighbours', 'viewing a flat'] },
-  { key: 'healthcare', name: 'Healthcare', description: 'Doctors, pharmacies, symptoms', subAreas: ['booking appointments', 'describing symptoms', 'pharmacy'] },
-  { key: 'travel', name: 'Travel', description: 'Trains, hotels, directions', subAreas: ['train station', 'hotels', 'asking directions', 'airport'] },
-  { key: 'fitness', name: 'Fitness & sport', description: 'Gyms, clubs, activities', subAreas: ['gym', 'classes', 'sports clubs'] },
-  { key: 'dating', name: 'Dating', description: 'Meeting people, flirting, plans', subAreas: ['first messages', 'dates', 'talking about yourself'] },
-  { key: 'hobbies', name: 'Hobbies', description: 'Your interests, clubs, weekend plans', subAreas: ['describing interests', 'joining a club', 'weekend plans'] },
-  { key: 'finance', name: 'Money & admin', description: 'Banks, bills, contracts', subAreas: ['bank', 'bills', 'contracts', 'cancelling'] },
-] as const
+
+/* ========================================================================== */
+/* Offline content — the language-specific material the offline adapter needs */
+/* ========================================================================== */
+
+export const GERMAN_OFFLINE: OfflineContent = {
+  assessmentItems: [
+    {
+      id: 'a1-read-1',
+      skill: 'reading',
+      level: 'A1',
+      prompt: 'Was bedeutet: "Ich komme aus Italien."?',
+      kind: 'multiple_choice',
+      options: ['I come from Italy.', 'I am going to Italy.', 'I live in Italy.'],
+      answer: 'I come from Italy.',
+    },
+    {
+      id: 'a2-read-1',
+      skill: 'reading',
+      level: 'A2',
+      prompt: 'Was bedeutet: "Ich muss leider meinen Termin verschieben."?',
+      kind: 'multiple_choice',
+      options: [
+        'Unfortunately I have to reschedule my appointment.',
+        'I would like to book an appointment.',
+        'I have missed my appointment.',
+      ],
+      answer: 'Unfortunately I have to reschedule my appointment.',
+    },
+    {
+      id: 'a2-listen-1',
+      skill: 'listening',
+      level: 'A2',
+      prompt: 'Listen, then choose what was said.',
+      audioText: 'Können wir das morgen kurz besprechen?',
+      kind: 'multiple_choice',
+      options: [
+        'Can we discuss that briefly tomorrow?',
+        'Did we discuss that yesterday?',
+        'We must decide that today.',
+      ],
+      answer: 'Can we discuss that briefly tomorrow?',
+    },
+    {
+      id: 'b1-read-1',
+      skill: 'comprehension',
+      level: 'B1',
+      prompt: 'Was bedeutet: "Ich bin mir nicht ganz sicher, ob das bis Freitag klappt."?',
+      kind: 'multiple_choice',
+      options: [
+        "I'm not entirely sure whether that will work out by Friday.",
+        'It definitely will not work by Friday.',
+        'I promise it will be done by Friday.',
+      ],
+      answer: "I'm not entirely sure whether that will work out by Friday.",
+    },
+    {
+      id: 'b1-listen-1',
+      skill: 'listening',
+      level: 'B1',
+      prompt: 'Listen, then choose what was said.',
+      audioText: 'Sag Bescheid, wenn du Hilfe brauchst — ich hab heute eh wenig zu tun.',
+      kind: 'multiple_choice',
+      options: [
+        'Let me know if you need help — I do not have much on today anyway.',
+        'I need help today because I have a lot on.',
+        'Tell me when you have finished the work.',
+      ],
+      answer: 'Let me know if you need help — I do not have much on today anyway.',
+    },
+    {
+      id: 'b2-vocab-1',
+      skill: 'vocabulary',
+      level: 'B2',
+      prompt: 'Which is the most natural way to disagree politely with a colleague?',
+      kind: 'multiple_choice',
+      options: ['Ehrlich gesagt sehe ich das ein bisschen anders.', 'Du hast unrecht.', 'Das ist falsch.'],
+      answer: 'Ehrlich gesagt sehe ich das ein bisschen anders.',
+    },
+    {
+      id: 'prod-1',
+      skill: 'production',
+      level: 'A2',
+      prompt:
+        'In German: tell a colleague what you have on today. Two or three sentences. Write what you can — imperfect is fine.',
+      kind: 'free_production',
+    },
+  ],
+
+  missions: [
+    {
+      title: 'Order your coffee entirely in German',
+      description:
+        'Go to a café and complete the whole exchange in German, including paying. Do not switch, even if they do.',
+      tier: 'beginner',
+      successCriteria: [
+        'You ordered without English',
+        'You understood the price',
+        'You responded to at least one unexpected question',
+      ],
+      preparationPhrases: [
+        { text: 'Einen Kaffee, bitte.', translation: 'A coffee, please.' },
+        { text: 'Zum Mitnehmen, bitte.', translation: 'To take away, please.' },
+      ],
+    },
+    {
+      title: 'Ask a colleague how their weekend was — and follow up twice',
+      description:
+        'Start the conversation and keep it going with two follow-up questions rather than letting it die.',
+      tier: 'intermediate',
+      successCriteria: ['You opened in German', 'You asked two follow-ups', 'The exchange lasted over a minute'],
+      preparationPhrases: [
+        { text: 'Wie war dein Wochenende?', translation: 'How was your weekend?' },
+        { text: 'Und was hast du da gemacht?', translation: 'And what did you do there?' },
+      ],
+    },
+    {
+      title: 'Make a phone call to book something',
+      description:
+        'Phone a doctor, hairdresser or restaurant and book an appointment. Phone calls remove all the visual cues — this is the real test.',
+      tier: 'intermediate',
+      successCriteria: ['You stated your purpose', 'You agreed a time', 'You confirmed what to bring'],
+      preparationPhrases: [
+        { text: 'Ich möchte einen Termin vereinbaren.', translation: 'I would like to make an appointment.' },
+        { text: 'Könnten Sie das bitte wiederholen?', translation: 'Could you repeat that, please?' },
+      ],
+    },
+    {
+      title: 'Explain a work problem in German',
+      description:
+        'In your next standup or one-to-one, explain one thing that is blocked and what you need — in German.',
+      tier: 'advanced',
+      successCriteria: ['You explained the cause', 'You said what you need', 'You handled a follow-up question'],
+      preparationPhrases: [
+        { text: 'Ich bin gerade blockiert, weil …', translation: "I'm currently blocked because …" },
+        { text: 'Könntest du mir dabei helfen?', translation: 'Could you help me with that?' },
+      ],
+    },
+  ],
+
+  conversationReplies: [
+    { reply: 'Alles klar. Und sonst noch etwas?', translation: 'All right. And anything else?' },
+    { reply: 'Verstehe. Können Sie mir das kurz genauer erklären?', translation: 'I see. Could you explain that in a bit more detail?' },
+    { reply: 'Gut, das machen wir so. Passt das für Sie?', translation: 'Good, let us do it that way. Does that work for you?' },
+    { reply: 'Mhm, und wie sieht es zeitlich bei Ihnen aus?', translation: 'Mhm, and how are you placed for time?' },
+  ],
+
+  productionPrompts: [
+    {
+      prompt: 'A colleague asks what you have on today. Answer them in two or three sentences.',
+      mode: 'writing',
+      situation: 'Monday morning, standing by the coffee machine.',
+      hints: ['Was steht heute bei dir an?', 'Ich muss …', 'Danach …'],
+      sampleAnswer:
+        'Heute muss ich eine Präsentation vorbereiten. Danach habe ich noch zwei Meetings. Und bei dir?',
+    },
+    {
+      prompt: 'Say out loud what you did last weekend. Keep going for at least 30 seconds.',
+      mode: 'speaking',
+      situation: 'Answering the standard Monday question.',
+      hints: ['Ich war …', 'Am Samstag …', 'Am Sonntag habe ich …'],
+      sampleAnswer:
+        'Am Samstag war ich klettern, das war ziemlich anstrengend. Am Sonntag habe ich nur gekocht und gelesen. Ganz ruhig also.',
+    },
+  ],
+
+  grammar: {
+    patternKey: 'preposition_contraction',
+    simple:
+      'German merges some prepositions with the article that follows: "zu dem" becomes "zum", "zu der" becomes "zur", "in dem" becomes "im". ' +
+      'You do not need to memorize a rule — you will see these constantly and they will start to sound wrong uncontracted.',
+    detailed:
+      'The contraction happens with dative articles after common prepositions: an/bei/in/von/zu + dem → am, beim, im, vom, zum; zu + der → zur. ' +
+      'German keeps the uncontracted form only when it is stressing a specific item — "Ich gehe zu dem Arzt, den du empfohlen hast" (that particular doctor). ' +
+      'In every ordinary sentence, contract.',
+    examples: [
+      { text: 'Ich gehe zum Supermarkt.', translation: 'I am going to the supermarket.' },
+      { text: 'Ich fahre zur Arbeit.', translation: 'I am driving to work.' },
+      { text: 'Wir treffen uns im Büro.', translation: 'We are meeting in the office.' },
+    ],
+    comparison:
+      'English has nothing like this, which is why learners keep writing "zu dem". It is the single most common giveaway in beginner German.',
+  },
+
+  crossDomain: {
+    bridgePhrases: [
+      {
+        text: 'Morgen muss ich eine Präsentation halten, deshalb habe ich heute wenig Zeit.',
+        translation: 'I have to give a presentation tomorrow, so I have little time today.',
+        builtFrom: ['Ich muss morgen eine Präsentation halten.'],
+      },
+      {
+        text: 'Nach der Arbeit gehe ich noch schnell einkaufen und danach ins Fitnessstudio.',
+        translation: 'After work I am quickly going shopping and then to the gym.',
+        builtFrom: ['Ich muss noch Gemüse kaufen.', 'Ich muss heute noch trainieren.'],
+      },
+    ],
+    miniStory: {
+      title: 'Ein ganz normaler Dienstag',
+      text: 'Heute war viel los. Am Morgen hatte ich zwei Meetings, und danach musste ich noch eine Präsentation vorbereiten. Am Abend war ich kurz einkaufen, weil nichts mehr im Kühlschrank war. Trainieren habe ich nicht geschafft. Morgen dann.',
+      translation:
+        'A lot was going on today. In the morning I had two meetings, and after that I still had to prepare a presentation. In the evening I went shopping briefly because there was nothing left in the fridge. I did not manage to train. Tomorrow then.',
+      newElements: ['weil nichts mehr im Kühlschrank war', 'Morgen dann.'],
+    },
+    speakingPrompt: {
+      prompt: 'Describe your day in a way that connects work with what you do afterwards.',
+      situation: 'A colleague asks how your week is going.',
+      mustUse: ['Ich muss …', 'deshalb', 'danach'],
+    },
+  },
+
+  correctionRules: [
+    {
+      pattern: /\bzu der (\w+)/i,
+      correct: (m) => `zur ${m[1]}`,
+      why: '"zu der" is almost always contracted to "zur" in speech and writing.',
+      severity: 'minor',
+      errorType: 'preposition_contraction',
+    },
+    {
+      pattern: /\bzu dem (\w+)/i,
+      correct: (m) => `zum ${m[1]}`,
+      why: '"zu dem" contracts to "zum".',
+      severity: 'minor',
+      errorType: 'preposition_contraction',
+    },
+    {
+      pattern: /\bin dem (\w+)/i,
+      correct: (m) => `im ${m[1]}`,
+      why: '"in dem" contracts to "im" unless you are stressing "that particular one".',
+      severity: 'minor',
+      errorType: 'preposition_contraction',
+    },
+    {
+      pattern: /\bich bin \d+ jahre alt\b/i,
+      correct: () => 'ich bin … Jahre alt',
+      why: 'Correct, but Germans usually just say the number: "Ich bin 34."',
+      severity: 'minor',
+      errorType: 'naturalness',
+    },
+  ],
+
+  registerObjective: 'I can adjust between du and Sie without thinking about it.',
+  comprehensionGapNote:
+    'Your comprehension is ahead of your production, which is the usual pattern for people living in a German-speaking country without speaking much. The plan weights speaking accordingly.',
+}

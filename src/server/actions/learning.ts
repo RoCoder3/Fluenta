@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
 import { requireUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { getDb } from '@/server/db'
 import { lifeAreas, sessionActivities } from '@/server/db/schema'
 import type { GeneratedCrossDomain, GeneratedEvaluation } from '@/server/ai/schemas'
@@ -34,7 +35,7 @@ export async function startSessionAction(input?: {
 export async function completeSessionAction(sessionId: string): Promise<void> {
   const user = await requireUser()
   await completeSession(sessionId, user.id)
-  await recomputeAreaReadiness(user.id)
+  await recomputeAreaReadiness(user.id, await getActiveLanguage(user.id))
   revalidatePath('/home')
   revalidatePath('/progress')
 }
@@ -108,7 +109,12 @@ export async function submitReviewAction(input: ReviewSubmission): Promise<{
 
   // A missed recall is evidence for the error model too, not just the scheduler.
   if (!correct && input.answer.trim()) {
-    await recordReviewError({ userId: user.id, said: input.answer, expected: input.expected })
+    await recordReviewError({
+      userId: user.id,
+      languageCode: await getActiveLanguage(user.id),
+      said: input.answer,
+      expected: input.expected,
+    })
   }
 
   return { correct, expected: input.expected, mastery: updated?.mastery ?? 0 }
@@ -232,6 +238,7 @@ export async function addLifeAreaAction(input: {
     .insert(lifeAreas)
     .values({
       userId: user.id,
+      targetLanguageCode: await getActiveLanguage(user.id),
       key,
       name: input.name,
       description: input.description ?? null,

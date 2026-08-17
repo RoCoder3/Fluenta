@@ -200,6 +200,7 @@ Requirements:
 
   return persistRoadmap({
     userId: model.userId,
+    languageCode: model.targetLanguageCode,
     lifeAreaId: lifeArea.id,
     generated: result.data,
     startingTier: input.startingTier ?? 'survival',
@@ -218,6 +219,7 @@ Stages mean:
 
 export async function persistRoadmap(input: {
   userId: string
+  languageCode: string
   lifeAreaId: string | null
   goalId?: string | null
   generated: { title: string; summary: string; stages: Array<{ name: string; tier: string; description: string; objectives: Array<{ canDo: string }> }> }
@@ -229,6 +231,7 @@ export async function persistRoadmap(input: {
     .insert(roadmaps)
     .values({
       userId: input.userId,
+      targetLanguageCode: input.languageCode,
       lifeAreaId: input.lifeAreaId,
       goalId: input.goalId ?? null,
       title: input.generated.title,
@@ -296,7 +299,13 @@ export async function generateInitialRoadmaps(
   const areas = await db
     .select()
     .from(lifeAreas)
-    .where(and(eq(lifeAreas.userId, userId), eq(lifeAreas.isActive, true)))
+    .where(
+      and(
+        eq(lifeAreas.userId, userId),
+        eq(lifeAreas.targetLanguageCode, model.targetLanguageCode),
+        eq(lifeAreas.isActive, true),
+      ),
+    )
     .orderBy(lifeAreas.priority)
     .limit(limit)
 

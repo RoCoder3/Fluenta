@@ -7,7 +7,7 @@ import { SetupRequired } from './setup-required'
 
 export const metadata: Metadata = {
   title: {
-    default: 'Fluenta — the German you actually need',
+    default: 'Fluenta — the language you actually need',
     template: '%s · Fluenta',
   },
   description:

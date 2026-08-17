@@ -111,7 +111,11 @@ export async function createSession(input: {
     ? model.lifeAreas.find((a) => a.key === input.lifeAreaKey)
     : model.lifeAreas.find((a) => a.key === model.currentFocus.lifeAreaKey) ?? model.lifeAreas[0]
 
-  const dueItems = await getDueItems(input.userId, type === 'review_only' ? 15 : 5)
+  const dueItems = await getDueItems(
+    input.userId,
+    model.targetLanguageCode,
+    type === 'review_only' ? 15 : 5,
+  )
 
   const activities: Array<{ kind: ActivityKind; payload: Record<string, unknown> }> = []
   const plan: SessionPlanStep[] = []
@@ -175,6 +179,7 @@ export async function createSession(input: {
     .insert(learningSessions)
     .values({
       userId: input.userId,
+      targetLanguageCode: model.targetLanguageCode,
       lifeAreaId: area?.id ?? null,
       type,
       title,
@@ -263,6 +268,7 @@ Every bridge phrase must list which known phrases it was built from.`,
   const db = await getDb()
   await db.insert(crossDomainItems).values({
     userId: model.userId,
+    targetLanguageCode: model.targetLanguageCode,
     lifeAreaKeys: [a, b],
     kind: 'bridge_phrase',
     sourcePhraseIds: [...phrasesA, ...phrasesB].map((p) => p.id),
@@ -272,12 +278,17 @@ Every bridge phrase must list which known phrases it was built from.`,
   return result.data
 }
 
-export async function getRecentCrossDomain(userId: string, limit = 5) {
+export async function getRecentCrossDomain(userId: string, languageCode: string, limit = 5) {
   const db = await getDb()
   return db
     .select()
     .from(crossDomainItems)
-    .where(eq(crossDomainItems.userId, userId))
+    .where(
+      and(
+        eq(crossDomainItems.userId, userId),
+        eq(crossDomainItems.targetLanguageCode, languageCode),
+      ),
+    )
     .orderBy(desc(crossDomainItems.createdAt))
     .limit(limit)
 }

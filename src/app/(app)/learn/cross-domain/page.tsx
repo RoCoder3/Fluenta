@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { buildLearnerModel } from '@/server/learner/model'
 import { getRecentCrossDomain } from '@/server/engines/content'
 
@@ -15,7 +16,7 @@ export default async function CrossDomainPage() {
 
   const [model, recent] = await Promise.all([
     buildLearnerModel(user.id),
-    getRecentCrossDomain(user.id, 4),
+    getRecentCrossDomain(user.id, await getActiveLanguage(user.id), 4),
   ])
 
   return (

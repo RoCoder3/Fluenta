@@ -4,9 +4,15 @@
  * Design notes that matter for the product:
  *
  * 1. LANGUAGE NEUTRALITY. Nothing here says "German". Every piece of language
- *    content carries a `languageCode`, and every learner carries a
- *    `targetLanguageCode` + `explanationLanguageCode`. German/English is a seed
- *    row, not a schema assumption. Adding Spanish means inserting a row.
+ *    content carries a `languageCode`, and every row of learner progress
+ *    carries a `targetLanguageCode`. German is a seed row, not a schema
+ *    assumption. Adding a language means inserting a row and a corpus.
+ *
+ * 1b. ONE LEARNER, MANY LANGUAGES. `learnerProfiles` is keyed by
+ *    (userId, targetLanguageCode) — it is the enrollment record, not a single
+ *    profile. All progress tables are scoped the same way, so studying Catalan
+ *    neither disturbs nor inherits from German, and switching back finds
+ *    everything where it was left.
  *
  * 2. THE PHRASE IS THE UNIT. `phrases` is the atom of the system, not a word
  *    list. Words exist only as `vocab` metadata hanging off phrases.
@@ -30,6 +36,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
@@ -43,6 +50,23 @@ const id = () =>
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+
+/**
+ * Which language a row of per-learner state belongs to.
+ *
+ * Every table below that holds learner *progress* carries this, because a
+ * learner can study more than one language and the two must not contaminate
+ * each other: German phrases must never surface in a Catalan review queue, and
+ * "dative vs accusative" is not a mistake you can make in Catalan.
+ *
+ * It is deliberately denormalized onto each table rather than reached through a
+ * join. The review queue and the dashboard filter on it on every request, and
+ * an unavoidable join on the hot path would be the wrong trade.
+ */
+const targetLanguage = () =>
+  text('target_language_code')
+    .notNull()
+    .references(() => languages.code)
 
 /* ========================================================================== */
 /* Languages                                                                  */
@@ -76,7 +100,17 @@ export const users = pgTable(
     name: text('name').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    /**
+     * First-ever onboarding completion. Whether the learner can enter the app
+     * *right now* is a per-language question — see `learnerProfiles` — but this
+     * still answers "is this a brand-new account?" for the landing redirect.
+     */
     onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
+    /**
+     * The language the learner is currently studying. Null only between signup
+     * and the first onboarding step. Every per-learner query is scoped by it.
+     */
+    activeTargetLanguageCode: text('active_target_language_code').references(() => languages.code),
     lastActiveAt: timestamp('last_active_at', { withTimezone: true }),
   },
   (t) => [uniqueIndex('users_email_unique').on(sql`lower(${t.email})`)],
@@ -111,7 +145,8 @@ export type LearningPreferences = {
   correctionStyle: 'gentle' | 'direct'
   grammarAppetite: 'minimal' | 'on_request' | 'curious'
   preferSpeaking: boolean
-  formalityDefault: 'du' | 'Sie' | 'mixed'
+  /** Language-neutral: each language renders these as du/Sie, tu/vostè, etc. */
+  formalityDefault: 'informal' | 'formal' | 'mixed'
 }
 
 export type SelfAssessment = {
@@ -121,9 +156,21 @@ export type SelfAssessment = {
   writing: number
 }
 
+/**
+ * One row per (learner, language they study) — the enrollment record.
+ *
+ * Almost everything here is language-specific in practice, not just in
+ * principle: the intake paragraph explains why they need *this* language, the
+ * estimated level is a level *in it*, and the regional preference (CH vs AT,
+ * Valencian vs Central) has no meaning without knowing which language it
+ * qualifies. Sharing one profile across languages would mean a beginner in
+ * Catalan inheriting a B2 German level.
+ *
+ * A row existing is what "enrolled"; `onboardingCompletedAt` is what "ready".
+ */
 export const learnerProfiles = pgTable('learner_profiles', {
   userId: text('user_id')
-    .primaryKey()
+    .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
 
   nativeLanguageCode: text('native_language_code')
@@ -136,6 +183,9 @@ export const learnerProfiles = pgTable('learner_profiles', {
     .notNull()
     .references(() => languages.code),
 
+  /** Set when this language's own onboarding finishes. Null = mid-setup. */
+  onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
+
   /** Free-text intake, kept verbatim — the source of truth the AI re-reads. */
   rawIntake: text('raw_intake'),
   /** One-paragraph synthesis of why this person needs the language. */
@@ -143,7 +193,7 @@ export const learnerProfiles = pgTable('learner_profiles', {
 
   city: text('city'),
   country: text('country'),
-  /** Which regional standard is actually useful to them: 'DE' | 'AT' | 'CH'. */
+  /** Which regional standard is actually useful to them: 'DE'|'AT'|'CH', 'ES-CT'|'ES-VC'|'ES-IB'. */
   regionPreference: text('region_preference'),
 
   profession: text('profession'),
@@ -171,7 +221,7 @@ export const learnerProfiles = pgTable('learner_profiles', {
 
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-})
+}, (t) => [primaryKey({ columns: [t.userId, t.targetLanguageCode] })])
 
 /* ========================================================================== */
 /* Life areas                                                                 */
@@ -186,6 +236,7 @@ export const lifeAreas = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     /** Stable slug: 'work', 'daily_life', 'social'… or 'custom_<uuid>'. */
     key: text('key').notNull(),
     name: text('name').notNull(),
@@ -200,7 +251,7 @@ export const lifeAreas = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('life_areas_user_key_unique').on(t.userId, t.key)],
+  (t) => [uniqueIndex('life_areas_user_key_unique').on(t.userId, t.targetLanguageCode, t.key)],
 )
 
 /* ========================================================================== */
@@ -214,6 +265,7 @@ export const goals = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     lifeAreaId: text('life_area_id').references(() => lifeAreas.id, { onDelete: 'set null' }),
     title: text('title').notNull(),
     description: text('description'),
@@ -226,7 +278,7 @@ export const goals = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('goals_user_idx').on(t.userId)],
+  (t) => [index('goals_user_idx').on(t.userId, t.targetLanguageCode)],
 )
 
 export const roadmaps = pgTable(
@@ -236,6 +288,7 @@ export const roadmaps = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     goalId: text('goal_id').references(() => goals.id, { onDelete: 'cascade' }),
     lifeAreaId: text('life_area_id').references(() => lifeAreas.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
@@ -246,7 +299,7 @@ export const roadmaps = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('roadmaps_user_idx').on(t.userId)],
+  (t) => [index('roadmaps_user_idx').on(t.userId, t.targetLanguageCode)],
 )
 
 export const roadmapStages = pgTable(
@@ -403,6 +456,9 @@ export const userPhrases = pgTable(
     phraseId: text('phrase_id')
       .notNull()
       .references(() => phrases.id, { onDelete: 'cascade' }),
+    /** Redundant with the phrase's own language, and worth it: the due-queue
+     *  query runs on every dashboard load and should not need the join. */
+    targetLanguageCode: targetLanguage(),
 
     /** 0–100. Blends accuracy, context diversity and recency. */
     mastery: real('mastery').notNull().default(0),
@@ -435,8 +491,8 @@ export const userPhrases = pgTable(
   },
   (t) => [
     uniqueIndex('user_phrases_user_phrase_unique').on(t.userId, t.phraseId),
-    index('user_phrases_due_idx').on(t.userId, t.dueAt),
-    index('user_phrases_status_idx').on(t.userId, t.status),
+    index('user_phrases_due_idx').on(t.userId, t.targetLanguageCode, t.dueAt),
+    index('user_phrases_status_idx').on(t.userId, t.targetLanguageCode, t.status),
   ],
 )
 
@@ -468,6 +524,7 @@ export const learningSessions = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     lifeAreaId: text('life_area_id').references(() => lifeAreas.id, { onDelete: 'set null' }),
     type: text('type')
       .$type<'daily' | 'focused' | 'review_only' | 'mission_prep' | 'cross_domain'>()
@@ -486,7 +543,7 @@ export const learningSessions = pgTable(
     startedAt: createdAt(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
-  (t) => [index('learning_sessions_user_idx').on(t.userId, t.startedAt)],
+  (t) => [index('learning_sessions_user_idx').on(t.userId, t.targetLanguageCode, t.startedAt)],
 )
 
 export const sessionActivities = pgTable(
@@ -516,7 +573,8 @@ export const sessionActivities = pgTable(
 export type Persona = {
   name: string
   role: string
-  register: 'du' | 'Sie'
+  /** In that language's own terms: 'du'/'Sie', 'tu'/'vostè'. See ScenarioTemplate. */
+  register: string
   region: string
   personality: string
   openingLine: string
@@ -529,6 +587,7 @@ export const conversations = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     lifeAreaId: text('life_area_id').references(() => lifeAreas.id, { onDelete: 'set null' }),
     scenarioKey: text('scenario_key').notNull(),
     scenarioTitle: text('scenario_title').notNull(),
@@ -539,7 +598,7 @@ export const conversations = pgTable(
     startedAt: createdAt(),
     endedAt: timestamp('ended_at', { withTimezone: true }),
   },
-  (t) => [index('conversations_user_idx').on(t.userId, t.startedAt)],
+  (t) => [index('conversations_user_idx').on(t.userId, t.targetLanguageCode, t.startedAt)],
 )
 
 export const conversationTurns = pgTable(
@@ -614,6 +673,7 @@ export const productionSubmissions = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     lifeAreaId: text('life_area_id').references(() => lifeAreas.id, { onDelete: 'set null' }),
     mode: text('mode').$type<'writing' | 'speaking'>().notNull(),
     /** e.g. 'email' | 'whatsapp' | 'monologue' | 'answer'. */
@@ -627,7 +687,7 @@ export const productionSubmissions = pgTable(
     evaluation: jsonb('evaluation').$type<ProductionEvaluation>(),
     createdAt: createdAt(),
   },
-  (t) => [index('production_user_idx').on(t.userId, t.createdAt)],
+  (t) => [index('production_user_idx').on(t.userId, t.targetLanguageCode, t.createdAt)],
 )
 
 /* ========================================================================== */
@@ -641,6 +701,7 @@ export const learnerErrors = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     /** Stable slug so occurrences merge: 'dative_accusative', 'verb_second'… */
     type: text('type').notNull(),
     category: text('category')
@@ -657,8 +718,8 @@ export const learnerErrors = pgTable(
     lastSeenAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex('learner_errors_user_type_unique').on(t.userId, t.type),
-    index('learner_errors_user_status_idx').on(t.userId, t.status),
+    uniqueIndex('learner_errors_user_type_unique').on(t.userId, t.targetLanguageCode, t.type),
+    index('learner_errors_user_status_idx').on(t.userId, t.targetLanguageCode, t.status),
   ],
 )
 
@@ -698,13 +759,14 @@ export const skills = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     category: text('category').$type<SkillCategory>().notNull(),
     score: real('score').notNull().default(0), // 0–100
     /** How much evidence backs the score, 0–1. Low = "we're still guessing". */
     confidence: real('confidence').notNull().default(0.2),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('skills_user_category_unique').on(t.userId, t.category)],
+  (t) => [uniqueIndex('skills_user_category_unique').on(t.userId, t.targetLanguageCode, t.category)],
 )
 
 /** Append-only history so the dashboard can show real trends over weeks. */
@@ -715,13 +777,16 @@ export const progressSnapshots = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     kind: text('kind').$type<'skill' | 'life_area' | 'overall'>().notNull(),
     /** Skill category, life-area key, or 'overall'. */
     subject: text('subject').notNull(),
     value: real('value').notNull(),
     recordedAt: createdAt(),
   },
-  (t) => [index('progress_snapshots_user_idx').on(t.userId, t.subject, t.recordedAt)],
+  (t) => [
+    index('progress_snapshots_user_idx').on(t.userId, t.targetLanguageCode, t.subject, t.recordedAt),
+  ],
 )
 
 /* ========================================================================== */
@@ -735,6 +800,7 @@ export const assessments = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     kind: text('kind').$type<'placement' | 'checkpoint'>().notNull().default('placement'),
     items: jsonb('items').$type<Record<string, unknown>[]>().notNull().default(sql`'[]'::jsonb`),
     responses: jsonb('responses').$type<Record<string, unknown>[]>().notNull().default(sql`'[]'::jsonb`),
@@ -743,7 +809,7 @@ export const assessments = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [index('assessments_user_idx').on(t.userId)],
+  (t) => [index('assessments_user_idx').on(t.userId, t.targetLanguageCode)],
 )
 
 /* ========================================================================== */
@@ -757,6 +823,7 @@ export const missions = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     lifeAreaId: text('life_area_id').references(() => lifeAreas.id, { onDelete: 'set null' }),
     title: text('title').notNull(),
     description: text('description').notNull(),
@@ -776,7 +843,7 @@ export const missions = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [index('missions_user_idx').on(t.userId, t.status)],
+  (t) => [index('missions_user_idx').on(t.userId, t.targetLanguageCode, t.status)],
 )
 
 /* ========================================================================== */
@@ -790,6 +857,7 @@ export const crossDomainItems = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     /** The two-or-more areas being bridged, e.g. ['work','fitness']. */
     lifeAreaKeys: jsonb('life_area_keys').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     kind: text('kind').$type<'bridge_phrase' | 'dialogue' | 'mini_story' | 'speaking_prompt'>().notNull(),
@@ -799,7 +867,7 @@ export const crossDomainItems = pgTable(
     consumedAt: timestamp('consumed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [index('cross_domain_user_idx').on(t.userId, t.createdAt)],
+  (t) => [index('cross_domain_user_idx').on(t.userId, t.targetLanguageCode, t.createdAt)],
 )
 
 /* ========================================================================== */
@@ -813,6 +881,7 @@ export const grammarExplanations = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    targetLanguageCode: targetLanguage(),
     question: text('question').notNull(),
     /** The sentence that prompted the question, if any. */
     triggerText: text('trigger_text'),
@@ -825,7 +894,7 @@ export const grammarExplanations = pgTable(
     comparison: text('comparison'),
     createdAt: createdAt(),
   },
-  (t) => [index('grammar_user_idx').on(t.userId, t.createdAt)],
+  (t) => [index('grammar_user_idx').on(t.userId, t.targetLanguageCode, t.createdAt)],
 )
 
 /* ========================================================================== */

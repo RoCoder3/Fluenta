@@ -8,20 +8,11 @@ import 'server-only'
  * features get added — a new engine inherits the philosophy for free.
  */
 
+import { languageName } from '@/lib/languages'
 import type { LearnerModel } from '@/server/learner/model'
 import { renderLearnerBrief } from '@/server/learner/model'
 
-const LANGUAGE_NAMES: Record<string, string> = {
-  de: 'German',
-  en: 'English',
-  es: 'Spanish',
-  fr: 'French',
-  it: 'Italian',
-}
-
-export function languageName(code: string): string {
-  return LANGUAGE_NAMES[code] ?? code.toUpperCase()
-}
+export { languageName } from '@/lib/languages'
 
 const CORE_RULES = `You are a language tutor built around one principle: the learner should become fluent in the language they actually need for the life they actually live — not in a generic curriculum.
 
@@ -60,15 +51,42 @@ const GERMAN_QUALITY = `German-specific quality requirements:
 - Swiss German dialect is a spoken language distinct from Swiss Standard German. Do not teach dialect unless the learner asks. Do warn a learner in Switzerland that what they hear on the street will not match what they read.
 - Modal particles (doch, mal, halt, eben, ja, denn) are what separate fluent German from correct German. Use them naturally and point them out when they carry the meaning.`
 
+const CATALAN_QUALITY = `Catalan-specific quality requirements:
+- Write Catalan, not Spanish with Catalan words. This is the most common way generated Catalan goes wrong: calqued word order, Spanish idioms translated literally, and Castilianisms (*bueno, *vale, *pues, *hasta luego) where Catalan has its own (bé/doncs/entesos/fins ara). If a sentence would back-translate word-for-word into natural Spanish, look at it again.
+- Use the PERIPHRASTIC preterite for the past: "vaig anar", "vam sopar", "va dir". The simple preterite ("aní", "sopàrem") is literary and sounds absurd in speech. This is the single most distinctive feature of the language.
+- Weak pronouns (en, hi, ho, el/la/els/les, em/et/ens/us) are obligatory, not optional polish. "N'hi ha tres", "me'n vaig", "no ho sé", "hi vaig anar". Omitting them is the clearest marker of a non-native speaker, so use them naturally and never write around them.
+- Regional standards matter and should follow where the learner lives:
+  · Central (ES-CT — Barcelona, Girona, Tarragona): 1sg present in -o ("jo parlo"). Default unless the learner says otherwise. "si us plau".
+  · Valencian (ES-VC): 1sg present in -e ("jo parle"); "este/eixe" for "aquest/aqueix"; "vosaltres" forms; "per favor" over "si us plau"; "vesprada" for the afternoon. A learner in València taught Central forms will sound wrong to everyone around them.
+  · Balearic (ES-IB): salat article ("sa casa", "es cotxe"); bare 1sg ("jo parl"); "al·lot/al·lota" for "noi/noia".
+- Formality is tu vs vostè. "Vostè" takes third-person agreement. It is used less than German "Sie" — shops and colleagues in Catalonia go to "tu" quickly — but it is still expected with older strangers, officials and doctors. Say which one you used when it matters.
+- Discourse particles (home, dona, doncs, vaja, eh, que at the start of a question) do the same work as German modal particles: they carry tone, not information. Use them and point them out.
+- Expressions with no Spanish or English equivalent — "Déu n'hi do", "plegar", "fer patxoca", "anar de bòlit" — are worth teaching explicitly, because they are exactly what a learner will never acquire by translation.
+- Be aware that most learners live in a bilingual environment and will be answered in Spanish the moment they hesitate. Where it is useful, prepare them for that socially, not just linguistically.`
+
+/**
+ * Per-language quality rules, appended to the constitution when the learner is
+ * studying that language.
+ *
+ * A language absent from this map still works — it just gets the core rules.
+ * Adding real depth for a new language means adding an entry here, which is
+ * the honest place for the knowledge to live.
+ */
+const LANGUAGE_QUALITY: Record<string, string> = {
+  ca: CATALAN_QUALITY,
+  de: GERMAN_QUALITY,
+}
+
 export function tutorSystemPrompt(model: LearnerModel, extra?: string): string {
   const target = languageName(model.targetLanguageCode)
   const explanation = languageName(model.explanationLanguageCode)
+  const quality = LANGUAGE_QUALITY[model.targetLanguageCode]
 
   return [
     CORE_RULES,
     '',
     `Target language: ${target}. Explanations are written in ${explanation}.`,
-    model.targetLanguageCode === 'de' ? '\n' + GERMAN_QUALITY : '',
+    quality ? '\n' + quality : '',
     extra ? '\n' + extra : '',
   ]
     .filter(Boolean)

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui'
 import { pct } from '@/lib/utils'
 import { getCurrentUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { getDb } from '@/server/db'
 import { roadmapObjectives, roadmapStages, roadmaps } from '@/server/db/schema'
 import { countDue } from '@/server/engines/review'
@@ -35,7 +36,11 @@ export default async function LearnPage({
   if (!user) redirect('/signin')
 
   const db = await getDb()
-  const [model, dueCount] = await Promise.all([buildLearnerModel(user.id), countDue(user.id)])
+  const language = await getActiveLanguage(user.id)
+  const [model, dueCount] = await Promise.all([
+    buildLearnerModel(user.id),
+    countDue(user.id, language),
+  ])
 
   const selectedArea =
     model.lifeAreas.find((a) => a.key === areaParam) ??

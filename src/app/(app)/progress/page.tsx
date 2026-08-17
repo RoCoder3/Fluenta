@@ -13,6 +13,7 @@ import {
 } from '@/components/ui'
 import { cn, pct, relativeTime, titleCase } from '@/lib/utils'
 import { getCurrentUser } from '@/server/auth'
+import { getActiveLanguage } from '@/server/learner/language'
 import { getErrorProfile } from '@/server/engines/feedback'
 import { getNewCapabilities, getProgressOverview } from '@/server/engines/progress'
 import { buildLearnerModel, describeBiggestGap } from '@/server/learner/model'
@@ -23,10 +24,11 @@ export default async function ProgressPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/signin')
 
+  const language = await getActiveLanguage(user.id)
   const [overview, errors, capabilities, model] = await Promise.all([
-    getProgressOverview(user.id),
-    getErrorProfile(user.id),
-    getNewCapabilities(user.id, 10),
+    getProgressOverview(user.id, language),
+    getErrorProfile(user.id, language),
+    getNewCapabilities(user.id, language, 10),
     buildLearnerModel(user.id),
   ])
 

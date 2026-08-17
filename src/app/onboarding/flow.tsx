@@ -55,14 +55,32 @@ const MOTIVATIONS = [
 
 const STEPS = ['Language', 'Your situation', 'Life areas', 'Where you stand', 'Ready'] as const
 
+/**
+ * The intake example is the highest-leverage text in onboarding: people mirror
+ * its level of detail. A generic prompt produces generic answers, so each
+ * language gets one grounded in a place its learners actually live.
+ */
+const PLACEHOLDERS: Record<string, string> = {
+  de: "I live in Zurich and work in IT. I can understand quite a lot of German but I'm terrible at speaking — I switch to English the moment it gets hard. I mostly need it at work, for dealing with the Kreisbüro and my landlord, and I'd like to actually make Swiss friends instead of only hanging out with expats.",
+  ca: "I moved to Barcelona two years ago and I get by in Spanish, so everyone just switches on me. I want to actually use Catalan — at work, with my partner's family, and for the endless paperwork at the Ajuntament. I read it fine but freeze the moment I have to say something.",
+  default:
+    "Where you live, what you do for work, what you find hard about the language, and the situations you keep avoiding. Be concrete — this paragraph shapes everything the app builds for you.",
+}
+
 export function OnboardingFlow({
   userName,
   languages,
   liveAi,
+  initialTargetLanguage,
+  isAdditionalLanguage,
 }: {
   userName: string
   languages: LanguageOption[]
   liveAi: boolean
+  /** Preselected when arriving from the language switcher. */
+  initialTargetLanguage: string
+  /** True when this learner has already finished onboarding in another language. */
+  isAdditionalLanguage: boolean
 }) {
   const router = useRouter()
   const [step, setStep] = useState(0)
@@ -70,7 +88,7 @@ export function OnboardingFlow({
   const [pending, startTransition] = useTransition()
 
   // Step 1
-  const [targetLanguage, setTargetLanguage] = useState('de')
+  const [targetLanguage, setTargetLanguage] = useState(initialTargetLanguage)
   const [explanationLanguage, setExplanationLanguage] = useState('en')
   const [motivations, setMotivations] = useState<string[]>([])
 
@@ -98,6 +116,7 @@ export function OnboardingFlow({
 
   const targets = languages.filter((l) => l.isTarget)
   const explanations = languages.filter((l) => l.isExplanation)
+  const targetName = targets.find((l) => l.code === targetLanguage)?.name ?? 'the language'
 
   function fail(e: unknown) {
     setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.')
@@ -233,8 +252,12 @@ export function OnboardingFlow({
 
         {step === 0 && (
           <Section
-            title={`Hello, ${userName}.`}
-            subtitle="Two quick things, then we get to the part that matters."
+            title={isAdditionalLanguage ? `Let's set up ${targetName}.` : `Hello, ${userName}.`}
+            subtitle={
+              isAdditionalLanguage
+                ? 'A fresh start for this language — your other one is untouched and waiting where you left it.'
+                : 'Two quick things, then we get to the part that matters.'
+            }
           >
             <div className="space-y-7">
               <div>
@@ -253,6 +276,12 @@ export function OnboardingFlow({
                 {targets.length === 1 && (
                   <p className="text-xs text-ink-faint mt-2">
                     More target languages are coming — the whole system is language-neutral underneath.
+                  </p>
+                )}
+                {isAdditionalLanguage && (
+                  <p className="text-xs text-ink-faint mt-2">
+                    You can switch between your languages at any time from the sidebar. Progress in
+                    each is kept separately.
                   </p>
                 )}
               </div>
@@ -321,7 +350,7 @@ export function OnboardingFlow({
               onChange={(e) => setRawIntake(e.target.value)}
               rows={7}
               maxLength={2000}
-              placeholder="I live in Zurich and work in IT. I can understand quite a lot of German but I'm terrible at speaking — I switch to English the moment it gets hard. I mostly need it at work, for dealing with the Kreisbüro and my landlord, and I'd like to actually make Swiss friends instead of only hanging out with expats."
+              placeholder={PLACEHOLDERS[targetLanguage] ?? PLACEHOLDERS.default!}
               className="min-h-[180px]"
             />
             <p className="text-xs text-ink-faint mt-2">
@@ -349,7 +378,7 @@ export function OnboardingFlow({
         {step === 2 && (
           <Section
             title="Here's what we heard."
-            subtitle="These are the areas of your life we'll build German around. Reorder them so the most urgent is first, and add anything we missed."
+            subtitle={`These are the areas of your life we'll build ${targetName} around. Reorder them so the most urgent is first, and add anything we missed.`}
           >
             {motivationSummary && (
               <Alert tone="accent" className="mb-5">
@@ -549,7 +578,7 @@ export function OnboardingFlow({
                       onChange={(e) => setAnswers({ ...answers, [item.id]: e.target.value })}
                       placeholder={
                         item.kind === 'free_production'
-                          ? 'Write what you can — imperfect German is exactly what we need to see.'
+                          ? `Write what you can — imperfect ${targetName} is exactly what we need to see.`
                           : 'Your answer…'
                       }
                       rows={item.kind === 'free_production' ? 4 : 2}

@@ -222,7 +222,9 @@ export const conversationSetupSchema = z.object({
   persona: z.object({
     name: z.string(),
     role: z.string(),
-    register: z.enum(['du', 'Sie']),
+    register: z
+      .string()
+      .describe("How they address the learner, in the target language's own terms: 'du'/'Sie', 'tu'/'vostè'"),
     region: z.string().describe('DE, AT or CH'),
     personality: z.string().describe('Brief; keeps the character consistent across turns'),
     openingLine: z.string().describe('Their first line, in the target language'),

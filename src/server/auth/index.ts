@@ -201,20 +201,36 @@ export async function pruneExpiredSessions(): Promise<number> {
   return deleted.length
 }
 
-/** True once the learner has a profile and has finished onboarding. */
+/**
+ * True once the learner has finished onboarding *for the language they are
+ * currently studying*.
+ *
+ * This is a per-language question, not a per-account one. Someone who has
+ * studied German for months and has just switched to Catalan has not onboarded
+ * in Catalan, and must go through it before the app has anything to show them.
+ */
 export async function hasCompletedOnboarding(userId: string): Promise<boolean> {
   const db = await getDb()
-  const [row] = await db
-    .select({ completedAt: users.onboardingCompletedAt })
+
+  const [user] = await db
+    .select({ active: users.activeTargetLanguageCode })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1)
-  if (!row?.completedAt) return false
+
+  // No language chosen yet — a brand-new account that has not started step one.
+  if (!user?.active) return false
 
   const [profile] = await db
-    .select({ userId: learnerProfiles.userId })
+    .select({ completedAt: learnerProfiles.onboardingCompletedAt })
     .from(learnerProfiles)
-    .where(eq(learnerProfiles.userId, userId))
+    .where(
+      and(
+        eq(learnerProfiles.userId, userId),
+        eq(learnerProfiles.targetLanguageCode, user.active),
+      ),
+    )
     .limit(1)
-  return Boolean(profile)
+
+  return Boolean(profile?.completedAt)
 }
