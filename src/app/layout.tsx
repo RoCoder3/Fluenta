@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from 'next'
 
+import { productionConfigProblems } from '@/server/config'
+
 import './globals.css'
+import { SetupRequired } from './setup-required'
 
 export const metadata: Metadata = {
   title: {
@@ -21,9 +24,14 @@ export const viewport: Viewport = {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // A misconfigured production deploy renders an explanation instead of the
+  // app. Checked at the root so it covers every route, and so no page ever
+  // reaches a database that isn't there. In development this is always empty.
+  const problems = productionConfigProblems()
+
   return (
     <html lang="en" suppressHydrationWarning>
-      <body>{children}</body>
+      <body>{problems.length ? <SetupRequired problems={problems} /> : children}</body>
     </html>
   )
 }

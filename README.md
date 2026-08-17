@@ -225,10 +225,18 @@ Known limitations worth naming:
 
 ## Deployment
 
-Set `DATABASE_URL` (real Postgres), `AUTH_SECRET` (`openssl rand -base64 48`), and optionally
-`ANTHROPIC_API_KEY`. `assertProductionConfig()` runs at startup and **refuses to boot** with a
-dev secret or an embedded database in production.
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full walkthrough, including Vercel.
+
+The short version: set `DATABASE_URL` to a real Postgres connection string and `AUTH_SECRET`
+to `openssl rand -base64 48`, run the migrations against it once, then deploy.
 
 ```bash
-npm run db:migrate && npm run db:seed && npm run build && npm start
+DATABASE_URL="postgres://…" npm run db:migrate
+DATABASE_URL="postgres://…" npm run db:seed
 ```
+
+PGlite is development-only — it needs a writable local directory and allows one writer, so it
+cannot work on serverless hosting. Production refuses to serve without a real database or with
+the placeholder secret, and renders a page naming the missing variables rather than a bare 500.
+`GET /api/health` reports driver, connectivity, migration state and remaining problems without
+exposing any secret.

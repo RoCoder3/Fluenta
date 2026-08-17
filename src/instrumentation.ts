@@ -1,14 +1,28 @@
 /**
  * Startup checks. Next.js calls `register()` once per server process.
+ *
+ * This must never throw. An exception here aborts server startup, so every
+ * route returns an opaque 500 with nothing actionable in the browser — which
+ * is exactly how a missing environment variable turns into a debugging
+ * session. Problems are logged here and surfaced as a setup page by the root
+ * layout instead.
  */
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
-  const { config, assertProductionConfig } = await import('@/server/config')
+  const { config, productionConfigProblems } = await import('@/server/config')
 
-  // Refuses to boot with a dev secret or an embedded database in production.
-  assertProductionConfig()
+  const problems = productionConfigProblems()
+  if (problems.length) {
+    console.error(
+      '\n╭─ Fluenta is not configured for production ─────────────────\n' +
+        problems.map((p) => `│  ${p.variable}: ${p.problem}\n│    → ${p.fix}`).join('\n') +
+        '\n│\n│  The app is serving a setup page until these are set.\n' +
+        '╰────────────────────────────────────────────────────────────\n',
+    )
+    return
+  }
 
   if (!config.isProduction && config.databaseUrl.startsWith('pglite://')) {
     console.log(

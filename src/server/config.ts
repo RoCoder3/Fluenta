@@ -15,8 +15,19 @@ function bool(key: string, fallback: boolean): boolean {
   return v === 'true' || v === '1' || v === 'yes'
 }
 
+function int(key: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[key] ?? '', 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
 export const config = {
   databaseUrl: str('DATABASE_URL', 'pglite://./.data/pg'),
+  /**
+   * Connections per process. Serverless multiplies this by the number of live
+   * instances, so production defaults to 1 and leans on a pooled connection
+   * string. Override for hosts with different limits.
+   */
+  databasePoolMax: int('DATABASE_POOL_MAX', process.env.NODE_ENV === 'production' ? 1 : 5),
 
   auth: {
     /**
@@ -46,17 +57,49 @@ export const config = {
   isProduction: process.env.NODE_ENV === 'production',
 } as const
 
-/** Called once at startup. Fails loudly rather than shipping a dev secret. */
-export function assertProductionConfig(): void {
-  if (!config.isProduction) return
-  const problems: string[] = []
+export type ConfigProblem = {
+  variable: string
+  problem: string
+  fix: string
+}
+
+/**
+ * Production configuration problems, as data rather than an exception.
+ *
+ * This deliberately does NOT throw. Throwing from the instrumentation hook
+ * takes down server startup itself, which turns a two-minute env-var fix into
+ * an opaque 500 on every route with nothing useful in the browser. Callers
+ * decide what to do: scripts assert, the web app renders a setup page.
+ */
+export function productionConfigProblems(): ConfigProblem[] {
+  if (!config.isProduction) return []
+  const problems: ConfigProblem[] = []
+
   if (config.auth.secret === 'dev-only-insecure-secret-change-me' || config.auth.secret.length < 32) {
-    problems.push('AUTH_SECRET must be set to at least 32 random characters in production.')
+    problems.push({
+      variable: 'AUTH_SECRET',
+      problem: 'Missing, or still the development placeholder.',
+      fix: 'Generate one with: openssl rand -base64 48',
+    })
   }
-  if (config.databaseUrl.startsWith('pglite://')) {
-    problems.push('DATABASE_URL points at embedded PGlite; use a hosted Postgres in production.')
+
+  if (config.databaseUrl.startsWith('pglite://') || config.databaseUrl.startsWith('file:')) {
+    problems.push({
+      variable: 'DATABASE_URL',
+      problem: 'Points at embedded PGlite, which cannot run on serverless hosting.',
+      fix: 'Use a hosted Postgres connection string (postgres://…). On Vercel, prefer the pooled URL.',
+    })
   }
-  if (problems.length) {
-    throw new Error(`Invalid production configuration:\n  - ${problems.join('\n  - ')}`)
-  }
+
+  return problems
+}
+
+/** Fails loudly. Used by scripts, where stopping is the correct response. */
+export function assertProductionConfig(): void {
+  const problems = productionConfigProblems()
+  if (!problems.length) return
+  throw new Error(
+    `Invalid production configuration:\n` +
+      problems.map((p) => `  - ${p.variable}: ${p.problem}\n    ${p.fix}`).join('\n'),
+  )
 }

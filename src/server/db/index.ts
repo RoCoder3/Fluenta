@@ -16,6 +16,8 @@ import 'server-only'
 import { drizzle as drizzlePglite, type PgliteDatabase } from 'drizzle-orm/pglite'
 import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js'
 
+import { config } from '@/server/config'
+
 import * as schema from './schema'
 
 /**
@@ -75,7 +77,25 @@ async function createDatabase(): Promise<Database> {
   }
 
   const postgres = (await import('postgres')).default
-  const client = postgres(url, { max: 10, prepare: false })
+
+  /**
+   * Serverless-safe pool settings.
+   *
+   * On Vercel each concurrent invocation is its own isolate with its own pool,
+   * so a per-process `max` multiplies by the number of live instances. A small
+   * `max` plus a pooled (pgbouncer/Neon pooler) connection string is what keeps
+   * a traffic spike from exhausting the database's connection limit.
+   *
+   * `prepare: false` is required for pgbouncer transaction-pooling mode, which
+   * does not support session-level prepared statements.
+   */
+  const client = postgres(url, {
+    max: config.databasePoolMax,
+    prepare: false,
+    idle_timeout: 20,
+    connect_timeout: 15,
+  })
+
   globalForDb.__ltClient = client
   return drizzlePostgres(client, { schema }) as unknown as Database
 }
