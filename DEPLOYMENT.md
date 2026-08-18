@@ -36,7 +36,7 @@ and a direct URL will exhaust the database's connection limit under load.
 | `AUTH_SECRET` | `openssl rand -base64 48` | **yes** |
 | `DATABASE_URL` | Pooled `postgres://…` string | only if not auto-injected |
 | `ANTHROPIC_API_KEY` | Your key | no — omit to run on the offline adapter |
-| `DATABASE_POOL_MAX` | Defaults to `1` in production | no |
+| `DATABASE_POOL_MAX` | Defaults to `5`; must be at least 3 | no |
 
 **You usually do not need to set `DATABASE_URL` by hand.** The app accepts the names
 managed integrations inject, in this order:
@@ -116,7 +116,11 @@ deploys can race. Fine for a solo project; use a release step if a team is deplo
 The app is a standard Next.js server — anything running Node 20+ works.
 
 - **Long-lived servers** (Railway, Render, Fly, a VM): raise `DATABASE_POOL_MAX` to ~10 and
-  use a direct connection string. The serverless default of 1 is needlessly conservative.
+  use a direct connection string.
+
+> **Do not set `DATABASE_POOL_MAX` below 3.** A pool smaller than the number of queries a
+> single request runs concurrently does not queue — it deadlocks, and the request hangs until
+> the host times it out with nothing logged. The app refuses to boot below 3 for that reason.
 - **Docker**: no special handling. `npm run build && npm start` with the env vars set.
 - **Native module**: `@node-rs/argon2` ships prebuilt binaries for linux-x64-gnu and is
   declared in `serverExternalPackages`, so it is not bundled. On Alpine/musl, install

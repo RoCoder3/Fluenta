@@ -18,7 +18,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const [dueCount, targets, enrollments] = await Promise.all([
     countDue(user.id, activeLanguage),
     getTargetLanguages(),
-    getEnrollments(user.id),
+    getEnrollments(user.id, activeLanguage),
   ])
 
   // Everything learnable, annotated with how far this learner has got in it.

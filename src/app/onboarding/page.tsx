@@ -17,10 +17,10 @@ export default async function OnboardingPage() {
   if (await hasCompletedOnboarding(user.id)) redirect('/home')
 
   const db = await getDb()
-  const [allLanguages, activeLanguage, enrollments] = await Promise.all([
+  const activeLanguage = await getActiveLanguage(user.id)
+  const [allLanguages, enrollments] = await Promise.all([
     db.select().from(languages),
-    getActiveLanguage(user.id),
-    getEnrollments(user.id),
+    getEnrollments(user.id, activeLanguage),
   ])
 
   /*

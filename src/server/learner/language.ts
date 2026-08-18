@@ -53,10 +53,18 @@ export async function getActiveLanguage(userId: string): Promise<string> {
   return profile?.code ?? FALLBACK_LANGUAGE
 }
 
-/** Every language this learner has started, with whether its setup is finished. */
-export async function getEnrollments(userId: string): Promise<Enrollment[]> {
+/**
+ * Every language this learner has started, with whether its setup is finished.
+ *
+ * Pass `activeCode` when the caller already knows it — the app layout does, and
+ * without it this would re-resolve the same value on every page load.
+ */
+export async function getEnrollments(
+  userId: string,
+  activeCode?: string,
+): Promise<Enrollment[]> {
   const db = await getDb()
-  const active = await getActiveLanguage(userId)
+  const active = activeCode ?? (await getActiveLanguage(userId))
 
   const rows = await db
     .select({

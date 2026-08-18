@@ -31,11 +31,22 @@ export const config = {
   /** Which variable supplied it. Safe to display; never the value itself. */
   databaseUrlSource: databaseUrlSource('runtime'),
   /**
-   * Connections per process. Serverless multiplies this by the number of live
-   * instances, so production defaults to 1 and leans on a pooled connection
-   * string. Override for hosts with different limits.
+   * Connections per process.
+   *
+   * Must be at least as large as the number of queries any single request runs
+   * concurrently. Pages routinely `Promise.all` several queries, and with a
+   * smaller pool than that those requests do not merely serialize — they hang
+   * until the platform kills them, with no error logged anywhere. A pool of 1
+   * looks conservative and is in fact a deadlock waiting for the first page
+   * that loads two things at once.
+   *
+   * 5 is chosen to comfortably exceed the widest fan-out in the app. Serverless
+   * multiplies this by the number of live instances, which is exactly what the
+   * pooled (pgbouncer/Neon pooler) connection string is for — the pooler
+   * multiplexes thousands of client connections onto a few server ones. Do not
+   * lower this below the widest `Promise.all` in a request path.
    */
-  databasePoolMax: int('DATABASE_POOL_MAX', process.env.NODE_ENV === 'production' ? 1 : 5),
+  databasePoolMax: int('DATABASE_POOL_MAX', 5),
 
   auth: {
     /**
@@ -64,6 +75,14 @@ export const config = {
 
   isProduction: process.env.NODE_ENV === 'production',
 } as const
+
+/** Below this, concurrent queries in one request deadlock rather than queue. */
+const MIN_POOL_MAX = 3
+
+/** Local stand-ins (pglite-socket) serve one connection at a time by design. */
+function isLocalDatabase(url: string): boolean {
+  return /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url)
+}
 
 export type ConfigProblem = {
   variable: string
@@ -100,6 +119,27 @@ export function productionConfigProblems(): ConfigProblem[] {
         'Set DATABASE_URL to a pooled postgres:// string. POSTGRES_URL, POSTGRES_PRISMA_URL and ' +
         'POSTGRES_URL_NON_POOLING are also accepted, so a Vercel Postgres or Supabase integration ' +
         'works without renaming anything — but the integration must be linked to THIS project.',
+    })
+  }
+
+  /**
+   * A pool smaller than a request's concurrent query count does not degrade
+   * gracefully — the request hangs until the platform times it out, logging
+   * nothing. This was a real outage: pages that `Promise.all` a few queries
+   * returned 504 with no error anywhere, while `select 1` stayed fast, so every
+   * signal pointed at the database being healthy. Refuse to boot instead.
+   *
+   * Skipped for a local database, because the pglite-socket stand-in used to
+   * exercise this exact code path locally serves one connection at a time — so
+   * local production-mode testing legitimately runs with a pool of 1.
+   */
+  if (config.databasePoolMax < MIN_POOL_MAX && !isLocalDatabase(config.databaseUrl)) {
+    problems.push({
+      variable: 'DATABASE_POOL_MAX',
+      problem:
+        `Set to ${config.databasePoolMax}, below the minimum of ${MIN_POOL_MAX}. Requests that load ` +
+        'several things at once will hang rather than queue.',
+      fix: `Remove it to use the default (${MIN_POOL_MAX}+), or set it to at least ${MIN_POOL_MAX}. A pooled connection string makes this safe.`,
     })
   }
 
